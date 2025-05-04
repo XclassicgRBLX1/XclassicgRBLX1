@@ -1,0 +1,916 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+-- Anti-cheat bypass
+local bypassPart
+if not workspace:FindFirstChild("AntiCheatBypass") then
+    bypassPart = Instance.new("Part", workspace)
+    bypassPart.Anchored = true
+    bypassPart.Locked = true
+    bypassPart.Name = "AntiCheatBypass"
+    bypassPart.Position = Vector3.new(624, 1143.7354695, 747)
+    bypassPart.CanCollide = false
+    bypassPart.Transparency = 1
+    bypassPart.Size = Vector3.new(35, 2, 35)
+end
+
+task.spawn(function()
+    while task.wait(0.1) do
+        if not bypassPart or not game.Players.LocalPlayer.Character or not game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            break
+        end
+        pcall(function()
+            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, bypassPart, 0)
+            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, bypassPart, 1)
+        end)
+    end
+end)
+
+-- Utility function to get playtime
+local function getTime()
+    return game.Players.LocalPlayer.PlayerGui.EventGUI.Time.Value
+end
+
+-- Utility function to check if player has a tool
+local function haveTool(toolName)
+    local player = game.Players.LocalPlayer
+    -- Check Backpack
+    if player.Backpack:FindFirstChild(toolName) then
+        return true
+    end
+    -- Check Character
+    if player.Character and player.Character:FindFirstChild(toolName) then
+        return true
+    end
+    return false
+end
+
+-- Utility function to merge two tables
+local function tableMerger(table1, table2)
+    local merged = {}
+    for _, v in ipairs(table1) do
+        table.insert(merged, v)
+    end
+    for _, v in ipairs(table2) do
+        table.insert(merged, v)
+    end
+    return merged
+end
+
+-- Utility function to get player by case-insensitive name
+local function getPlayerByLowerName(name)
+    name = name:lower()
+    for _, player in ipairs(game.Players:GetPlayers()) do
+        if player.Name:lower() == name then
+            return player
+        end
+    end
+    return nil
+end
+
+game.Players.LocalPlayer:SetAttribute("WaitScriptEnd", false)
+
+-- Create Rayfield window
+local Window = Rayfield:CreateWindow({
+    Name = "Humbled4 Hub | Survive In Area 51",
+    LoadingTitle = "Humbled4 Hub",
+    LoadingSubtitle = "By XclassicgRBLX",
+    ConfigurationSaving = {
+        Enabled = false,
+        FolderName = "GunManipulatorConfig",
+        FileName = "Config"
+    },
+    KeySystem = false
+})
+
+-- Create Gun Modifier tab
+local GunModifierTab = Window:CreateTab("Gun Modifier", nil)
+
+-- Create Healing tab
+local HealingTab = Window:CreateTab("Healing", nil)
+
+-- Create Combat tab
+local CombatTab = Window:CreateTab("Combat", nil)
+
+-- Create Get Weapon tab
+local GetWeaponTab = Window:CreateTab("Get Weapon", nil)
+
+-- Create Supply Boxes tab
+local SupplyBoxesTab = Window:CreateTab("Supply Boxes", nil)
+
+-- Create Teleport tab
+local TeleportTab = Window:CreateTab("Teleport", nil)
+
+-- Create Player tab
+local PlayerTab = Window:CreateTab("Player", nil)
+
+-- Weapon Name input (Gun Modifier tab)
+local textbox = GunModifierTab:CreateInput({
+    Name = "Weapon Name",
+    PlaceholderText = "Put the weapon name here",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Value)
+        -- Store value for use in MODIFIED!! button
+        _G.WeaponName = Value
+    end
+})
+
+-- Firerate input (Gun Modifier tab)
+local firerate = GunModifierTab:CreateInput({
+    Name = "Firerate",
+    PlaceholderText = "Firerate",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Value)
+        -- Store value for use in MODIFIED!! button
+        _G.Firerate = Value
+    end
+})
+
+-- Ammo input (Gun Modifier tab)
+local ammo = GunModifierTab:CreateInput({
+    Name = "Ammo",
+    PlaceholderText = "Ammo",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Value)
+        -- Store value for use in MODIFIED!! button
+        _G.Ammo = Value
+    end
+})
+
+-- Shotgun slider (Gun Modifier tab)
+local shotgun = GunModifierTab:CreateSlider({
+    Name = "Turn Gun into Shotgun",
+    Range = {0, 1},
+    Increment = 1,
+    Suffix = "Shotgun",
+    CurrentValue = 0,
+    Flag = "ShotgunSlider",
+    Callback = function(Value)
+        -- Store value for use in MODIFIED!! button (0 = false, 1 = true)
+        _G.Shotgun = Value
+    end
+})
+
+-- MODIFIED!! button (Gun Modifier tab)
+GunModifierTab:CreateButton({
+    Name = "MODIFIED!!",
+    Callback = function()
+        -- Play sound on button click
+        local sound = Instance.new("Sound", game.Workspace)
+        sound.SoundId = "rbxassetid://3359047365"
+        sound.Volume = 2
+        sound:Play()
+
+        -- Get gun settings
+        local gun = game:GetService("Players").LocalPlayer.Backpack:FindFirstChild(_G.WeaponName and _G.WeaponName or "")
+        
+        if gun and gun:FindFirstChild("Setting") then
+            local m = require(gun.Setting)
+
+            m.FireRate = tonumber(_G.Firerate) or m.FireRate
+            m.AmmoPerClip = tonumber(_G.Ammo) or m.AmmoPerClip
+            m.ShotgunEnabled = _G.Shotgun == 1
+            m.Auto = 1
+            m.CameraShakingEnabled = false
+            m.ChargedShotEnabled = false
+        else
+            warn("Gun not found in backpack or missing Setting module.")
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Gun not found in backpack or missing Setting module.",
+                Duration = 5
+            })
+        end
+    end
+})
+
+-- Instant Regen toggle (Healing tab)
+local instantRegenToggle
+instantRegenToggle = HealingTab:CreateToggle({
+    Name = "Instant Regen",
+    CurrentValue = false,
+    Flag = "InstantRegenToggle",
+    Callback = function(Value)
+        if Value then
+            task.spawn(function()
+                while Value and task.wait(0.1) do
+                    pcall(function()
+                        local head = game.Players.LocalPlayer.Character.Head
+                        local playTime = getTime()
+                        if playTime < 15 then
+                            firetouchinterest(head, workspace.Misc["Blizzard Armor"].Head, 1)
+                            firetouchinterest(head, workspace.Misc["Blizzard Armor"].Head, 0)
+                        elseif playTime >= 15 and playTime < 30 then
+                            firetouchinterest(head, workspace.Misc["Silver Armor - 15 min Playtime"].Head, 0)
+                            firetouchinterest(head, workspace.Misc["Silver Armor - 15 min Playtime"].Head, 1)
+                        elseif playTime >= 30 and playTime < 60 then
+                            firetouchinterest(head, workspace.Misc["Golden Armor - 30 min Playtime"].Head, 0)
+                            firetouchinterest(head, workspace.Misc["Golden Armor - 30 min Playtime"].Head, 1)
+                        elseif playTime >= 60 then
+                            firetouchinterest(head, workspace.Misc["Diamond Armor - 60 min Playtime"].Head, 0)
+                            firetouchinterest(head, workspace.Misc["Diamond Armor - 60 min Playtime"].Head, 1)
+                        end
+                    end)
+                end
+            end)
+        end
+    end
+})
+
+-- Heal All Players (Cleansed Rifle) toggle (Healing tab)
+local healAllPlayersToggle
+healAllPlayersToggle = HealingTab:CreateToggle({
+    Name = "Heal All Players (Cleansed Rifle)",
+    CurrentValue = false,
+    Flag = "HealAllPlayersToggle",
+    Callback = function(Value)
+        if Value then
+            task.spawn(function()
+                while Value and task.wait(0.5) do
+                    pcall(function()
+                        for _, tool in ipairs(tableMerger(game.Players.LocalPlayer.Character:GetChildren(), game.Players.LocalPlayer.Backpack:GetChildren())) do
+                            if tool:IsA("Tool") and tool:FindFirstChild("GunScript_Server") and tool.Name == "Cleansed Rifle" then
+                                for _, player in ipairs(game.Players:GetPlayers()) do
+                                    if player.Character and player.Character:FindFirstChild("Humanoid") and player.Character:FindFirstChild("Head") then
+                                        local args = {
+                                            [1] = "Head",
+                                            [2] = player.Character.Humanoid,
+                                            [3] = player.Character.Head,
+                                            [4] = tool,
+                                            [5] = Vector3.new(0.937201201915741, -0.3045220375061035, -0.17005980014801025)
+                                        }
+                                        tool.GunScript_Server.InflictTarget:FireServer(unpack(args))
+                                    end
+                                end
+                            end
+                        end
+                    end, function(err)
+                        warn("Failed to heal all players: " .. tostring(err))
+                        Rayfield:Notify({
+                            Title = "Error",
+                            Content = "Failed to heal all players. Ensure you have a Cleansed Rifle and players are valid.",
+                            Duration = 5
+                        })
+                    end)
+                end
+            end)
+        end
+    end
+})
+
+-- Target Player input (Healing tab)
+local targetPlayerInput
+targetPlayerInput = HealingTab:CreateInput({
+    Name = "Target Player",
+    PlaceholderText = "Enter player username",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Value)
+        -- Store value for use in Heal User (Need Cleansed Rifle) toggle
+        _G.TargetPlayerName = Value
+    end
+})
+
+-- Heal User (Need Cleansed Rifle) toggle (Healing tab)
+HealingTab:CreateToggle({
+    Name = "Heal User (Need Cleansed Rifle)",
+    CurrentValue = false,
+    Flag = "HealUserToggle",
+    Callback = function(Value)
+        _G.HealUserEnabled = Value
+        if Value then
+            task.spawn(function()
+                pcall(function()
+                    local player = getPlayerByLowerName(_G.TargetPlayerName or "")
+                    if player and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character:FindFirstChild("Head") then
+                        Rayfield:Notify({
+                            Title = "Healing Started",
+                            Content = "Healing " .. player.Name .. ". Toggle off to stop.",
+                            Duration = 5
+                        })
+                        while _G.HealUserEnabled and player and game.Players.LocalPlayer and player.Character and task.wait(0.1) do
+                            for _, tool in ipairs(tableMerger(game.Players.LocalPlayer.Character:GetChildren(), game.Players.LocalPlayer.Backpack:GetChildren())) do
+                                if tool:IsA("Tool") and tool.Name == "Cleansed Rifle" then
+                                    local args = {
+                                        [1] = "Head",
+                                        [2] = player.Character.Humanoid,
+                                        [3] = player.Character.Head,
+                                        [4] = tool,
+                                        [5] = Vector3.new(0.937201201915741, -0.3045220375061035, -0.17005980014801025)
+                                    }
+                                    tool.GunScript_Server.InflictTarget:FireServer(unpack(args))
+                                end
+                            end
+                        end
+                    else
+                        warn("Player not found or invalid character.")
+                        Rayfield:Notify({
+                            Title = "Error",
+                            Content = "Player not found or has no valid character. Check username.",
+                            Duration = 5
+                        })
+                    end
+                end, function(err)
+                    warn("Failed to heal user: " .. tostring(err))
+                    Rayfield:Notify({
+                        Title = "Error",
+                        Content = "Failed to heal user. Ensure you have a Cleansed Rifle and the player is valid.",
+                        Duration = 5
+                    })
+                end)
+            end)
+        end
+    end
+})
+
+-- Instant Kill Range slider (Combat tab)
+CombatTab:CreateSlider({
+    Name = "Instant Kill Range",
+    Range = {0, 300},
+    Increment = 1,
+    Suffix = "Range",
+    CurrentValue = 40,
+    Flag = "InstantKillRangeSlider",
+    Callback = function(Value)
+        -- Store value for use in Instant Kill (Only Works When Near Enemies (Need to have Weapons)) toggle
+        _G.InstantKillRange = Value
+    end
+})
+
+-- Instant Kill (Only Works When Near Enemies (Need to have Weapons)) toggle (Combat tab)
+CombatTab:CreateToggle({
+    Name = "Instant Kill (Only Works When Near Enemies (Need to have Weapons))",
+    CurrentValue = false,
+    Flag = "InstantKillToggle",
+    Callback = function(Value)
+        _G.InstantKillEnabled = Value
+        if Value then
+            task.spawn(function()
+                while _G.InstantKillEnabled do
+                    pcall(function()
+                        -- Ensure character and HumanoidRootPart exist
+                        local character = game.Players.LocalPlayer.Character
+                        if not character or not character:FindFirstChild("HumanoidRootPart") then
+                            return
+                        end
+
+                        -- Check for valid tool to avoid unnecessary calls
+                        local hasValidTool = false
+                        for _, tool in ipairs(tableMerger(character:GetChildren(), game.Players.LocalPlayer.Backpack:GetChildren())) do
+                            if tool:IsA("Tool") and tool:FindFirstChild("GunScript_Server") then
+                                hasValidTool = true
+                                break
+                            end
+                        end
+                        if not hasValidTool then
+                            task.wait(0.5)
+                            return
+                        end
+
+                        -- Get nearby parts with a reduced frequency
+                        local range = _G.InstantKillRange or 40
+                        local parts = workspace:GetPartBoundsInRadius(character.HumanoidRootPart.Position, range)
+                        local processedParts = 0
+
+                        for _, part in ipairs(parts) do
+                            if not _G.InstantKillEnabled then
+                                break
+                            end
+                            if processedParts >= 20 then -- Reduced limit for performance
+                                break
+                            end
+                            if part.Parent:IsA("Model") and part.Parent:FindFirstChildOfClass("Humanoid") and part.Parent ~= character and part.Parent.Name ~= "FakeFriend" then
+                                local humanoid = part.Parent:FindFirstChildOfClass("Humanoid")
+                                if humanoid and humanoid.Health > 0 and not game.Players:GetPlayerFromCharacter(humanoid.Parent) and not humanoid:IsDescendantOf(workspace.Ground) and not humanoid:IsDescendantOf(workspace.Mineshaft) then
+                                    for _, tool in ipairs(tableMerger(character:GetChildren(), game.Players.LocalPlayer.Backpack:GetChildren())) do
+                                        if tool:IsA("Tool") and tool:FindFirstChild("GunScript_Server") then
+                                            local args = {
+                                                [1] = "Head",
+                                                [2] = humanoid,
+                                                [3] = humanoid.Parent.Head,
+                                                [4] = tool,
+                                                [5] = Vector3.new(0.937201201915741, -0.3045220375061035, -0.17005980014801025)
+                                            }
+                                            tool.GunScript_Server.InflictTarget:FireServer(unpack(args))
+                                        end
+                                    end
+                                    processedParts = processedParts + 1
+                                end
+                            end
+                        end
+                    end, function(err)
+                        warn("Failed to instant kill: " .. tostring(err))
+                        Rayfield:Notify({
+                            Title = "Error",
+                            Content = "Failed to instant kill. Ensure you have a valid tool and enemies are nearby.",
+                            Duration = 5
+                        })
+                    end)
+                    task.wait(0.5) -- Increased delay for better performance
+                end
+            end)
+        else
+            -- Ensure physics state is restored when toggle is turned off
+            local character = game.Players.LocalPlayer.Character
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                local hrp = character.HumanoidRootPart
+                hrp.Anchored = false -- Ensure the part isn't stuck
+            end
+        end
+    end
+})
+
+-- Remove Bull button (Combat tab)
+CombatTab:CreateButton({
+    Name = "Remove Bull",
+    Callback = function()
+        pcall(function()
+            workspace.Incinerator.Challenge1.Model.Model.ChallengeGate:Destroy()
+            workspace.Incinerator.Acid:Destroy()
+            for _, bull in ipairs(workspace.Bulls:GetDescendants()) do
+                bull:Destroy()
+            end
+            Rayfield:Notify({
+                Title = "Success",
+                Content = "Bull-related objects removed.",
+                Duration = 5
+            })
+        end, function(err)
+            warn("Failed to remove bull objects: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to remove bull objects. Ensure the objects exist.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Get All Event Guns toggle (Get Weapon tab)
+GetWeaponTab:CreateToggle({
+    Name = "Get All Event Guns",
+    CurrentValue = false,
+    Flag = "GetAllEventGunsToggle",
+    Callback = function(Value)
+        if Value then
+            task.spawn(function()
+                while Value and task.wait(0.5) do
+                    pcall(function()
+                        if workspace:FindFirstChild("GetReaperGun") and not haveTool("Reaper\'s Scythe") then
+                            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.GetReaperGun, 0)
+                        elseif workspace:FindFirstChild("GetSecurityTablet") and not haveTool("Security Tablet") then
+                            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.GetSecurityTablet, 0)
+                        elseif workspace:FindFirstChild("GetScarecrowSkull") and not haveTool("Scarecrow Skull") then
+                            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.GetScarecrowSkull, 0)
+                        elseif workspace:FindFirstChild("DeadGround") and not haveTool("LXD") then
+                            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.DeadGround["LXD - 9999 Cell"], 0)
+                        elseif workspace:FindFirstChild("NightCity") and not haveTool("Corrupted Rifle") then
+                            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.NightCity.Exit.Head, 0)
+                        elseif workspace.Sewer:FindFirstChild("GetWaterGun") and not haveTool("Water Gun") then
+                            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.Sewer.GetWaterGun, 0)
+                        elseif workspace:FindFirstChild("CyberLand") and workspace.CyberLand:FindFirstChild("GetMechGun") and not haveTool("Mech O\' Matic") then
+                            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.CyberLand.GetMechGun, 0)
+                        elseif workspace:FindFirstChild("CorruptedZone") and not haveTool("RGB") then
+                            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace["CorruptedZone.RGB - 9999 Cell"].Head, 0)
+                        end
+                    end, function(err)
+                        warn("Failed to get event guns: " .. tostring(err))
+                        Rayfield:Notify({
+                            Title = "Error",
+                            Content = "Failed to get event guns. Ensure you have a character and the targets exist.",
+                            Duration = 5
+                        })
+                    end)
+                end
+            end)
+        end
+    end
+})
+
+-- Get Ice Crossbow button (Get Weapon tab)
+GetWeaponTab:CreateButton({
+    Name = "Get Ice Crossbow",
+    Callback = function()
+        pcall(function()
+            firetouchinterest(game.Players.LocalPlayer.Character.Head, workspace.IceZone.GetIceCrossbow.Head, 0)
+            firetouchinterest(game.Players.LocalPlayer.Character.Head, workspace.IceZone.GetIceCrossbow.Head, 1)
+        end, function(err)
+            warn("Failed to get Ice Crossbow: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to get Ice Crossbow. Ensure you have a character and the target exists.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Get Red Missile Launcher button (Get Weapon tab)
+GetWeaponTab:CreateButton({
+    Name = "Get Red Missile Launcher",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-354, 1073, 411)
+        end, function(err)
+            warn("Failed to get Red Missile Launcher: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to get Red Missile Launcher. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Get LXW button (Get Weapon tab)
+GetWeaponTab:CreateButton({
+    Name = "Get LXW",
+    Callback = function()
+        pcall(function()
+            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.Exit, 0)
+            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace.Exit, 1)
+        end, function(err)
+            warn("Failed to get LXW: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to get LXW. Ensure you have a character and the target exists.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Get Hex Gun button (Get Weapon tab)
+GetWeaponTab:CreateButton({
+    Name = "Get Hex Gun",
+    Callback = function()
+        pcall(function()
+            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace["Floor 2"].GetHEXGun.Head, 0)
+            firetouchinterest(game.Players.LocalPlayer.Character.HumanoidRootPart, workspace["Floor 2"].GetHEXGun.Head, 1)
+        end, function(err)
+            warn("Failed to get Hex Gun: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to get Hex Gun. Ensure you have a character and the target exists.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Get Fire Sword button (Get Weapon tab)
+GetWeaponTab:CreateButton({
+    Name = "Get Fire Sword",
+    Callback = function()
+        pcall(function()
+            repeat task.wait()
+                game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = workspace.Incinerator.ChallengeButton7.Button.CFrame
+                fireproximityprompt(workspace.Incinerator.ChallengeButton7.Button.ProximityPrompt, 0)
+            until workspace.Incinerator.ChallengeButton7.Button.ProximityPrompt.Enabled == false
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(61, 1062, 1158)
+        end, function(err)
+            warn("Failed to get Fire Sword: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to get Fire Sword. Ensure you have a character and the targets exist.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Get Water Gun button (Get Weapon tab)
+GetWeaponTab:CreateButton({
+    Name = "Get Water Gun",
+    Callback = function()
+        pcall(function()
+            repeat task.wait()
+                game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = workspace.Sewer.Valve1.CFrame
+                fireproximityprompt(workspace.Sewer.Valve1.ProximityPrompt, 0)
+            until workspace.Sewer.Valve1.ProximityPrompt.Enabled == false
+            repeat task.wait()
+                game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = workspace.Sewer.Valve2.CFrame
+                fireproximityprompt(workspace.Sewer.Valve2.ProximityPrompt, 0)
+            until workspace.Sewer.Valve2.ProximityPrompt.Enabled == false
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-362, 960, -54)
+        end, function(err)
+            warn("Failed to get Water Gun: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to get Water Gun. Ensure you have a character and the targets exist.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Get Vulcan button (Get Weapon tab)
+GetWeaponTab:CreateButton({
+    Name = "Get Vulcan",
+    Callback = function()
+        pcall(function()
+            firetouchinterest(game.Players.LocalPlayer.Character.Head, workspace.LavaZone.Escape.Head, 0)
+            firetouchinterest(game.Players.LocalPlayer.Character.Head, workspace.LavaZone.Escape.Head, 1)
+        end, function(err)
+            warn("Failed to get Vulcan: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to get Vulcan. Ensure you have a character and the target exists.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Unpack All Supply Boxes button (Supply Boxes tab)
+SupplyBoxesTab:CreateButton({
+    Name = "Unpack All Supply Boxes",
+    Callback = function()
+        pcall(function()
+            local savedCFrame = game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame
+            for _, promp in ipairs(workspace:GetChildren()) do
+                if promp:IsA("BasePart") and (promp.Name == "SupplyBox" or promp.Name == "SupplyBall") then
+                    promp.ProximityPrompt.MaxActivationDistance = 100
+                    promp.ProximityPrompt.Enabled = true
+                    promp.ProximityPrompt.ClickablePrompt = true
+                    repeat task.wait()
+                        game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = promp.CFrame
+                        pcall(function() fireproximityprompt(promp.ProximityPrompt, 1e9) end)
+                    until not promp or not promp:FindFirstChild("ProximityPrompt")
+                end
+            end
+            task.wait(0.1)
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = savedCFrame
+        end, function(err)
+            warn("Failed to unpack supply boxes: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to unpack supply boxes. Ensure you have a character and supply boxes exist.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Unpack All Supply Boxes (Toggle, Great for Auto Farm, But Glitches ur movement) toggle (Supply Boxes tab)
+SupplyBoxesTab:CreateToggle({
+    Name = "Unpack All Supply Boxes (Toggle, Great for Auto Farm, But Glitches ur movement)",
+    CurrentValue = false,
+    Flag = "UnpackSupplyBoxesToggle",
+    Callback = function(Value)
+        _G.UnpackSupplyBoxesEnabled = Value
+        if Value then
+            task.spawn(function()
+                while _G.UnpackSupplyBoxesEnabled and task.wait(0.1) do
+                    pcall(function()
+                        local saved = game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame
+                        for _, promp in ipairs(workspace:GetChildren()) do
+                            if promp:IsA("BasePart") and (promp.Name == "SupplyBox" or promp.Name == "SupplyBall") then
+                                promp.ProximityPrompt.MaxActivationDistance = 100
+                                promp.ProximityPrompt.Enabled = true
+                                promp.ProximityPrompt.ClickablePrompt = true
+                                repeat task.wait()
+                                    game.Workspace[game.Players.LocalPlayer.Name]:SetPrimaryPartCFrame(promp.CFrame)
+                                    pcall(function() fireproximityprompt(promp.ProximityPrompt, 1e9) end)
+                                until not promp or not promp:FindFirstChild("ProximityPrompt")
+                            end
+                        end
+                        task.wait(0.1)
+                        game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = saved
+                    end, function(err)
+                        warn("Failed to unpack supply boxes (toggle): " .. tostring(err))
+                        Rayfield:Notify({
+                            Title = "Error",
+                            Content = "Failed to unpack supply boxes (toggle). Ensure you have a character and supply boxes exist.",
+                            Duration = 5
+                        })
+                    end)
+                end
+            end)
+        end
+    end
+})
+
+-- Teleport buttons (Teleport tab)
+TeleportTab:CreateButton({
+    Name = "Spawn",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(709, 1150, 744)
+        end, function(err)
+            warn("Failed to teleport to Spawn: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to teleport to Spawn. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "Portal",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-101, 982, 805)
+        end, function(err)
+            warn("Failed to teleport to Portal: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to teleport to Portal. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "Incinerator",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-322, 1062, 1159)
+        end, function(err)
+            warn("Failed to teleport to Incinerator: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to teleport to Incinerator. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "Metro",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-469, 922, 749)
+        end, function(err)
+            warn("Failed to teleport to Metro: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to teleport to Metro. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "Sewerage",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-495, 916, -56)
+        end, function(err)
+            warn("Failed to teleport to Sewerage: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to teleport to Sewerage. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "Reaper Door",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-202, 982, 294)
+        end, function(err)
+            warn("Failed to teleport to Reaper Door: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to teleport to Reaper Door. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "Mineshaft",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(-471, 753, 920)
+        end, function(err)
+            warn("Failed to teleport to Mineshaft: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to teleport to Mineshaft. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+TeleportTab:CreateButton({
+    Name = "Craft Zone",
+    Callback = function()
+        pcall(function()
+            game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(954, 1070, 735)
+        end, function(err)
+            warn("Failed to teleport to Craft Zone: " .. tostring(err))
+            Rayfield:Notify({
+                Title = "Error",
+                Content = "Failed to teleport to Craft Zone. Ensure you have a character.",
+                Duration = 5
+            })
+        end)
+    end
+})
+
+-- Tpwalk Speed slider (Player tab)
+PlayerTab:CreateSlider({
+    Name = "Tpwalk Speed",
+    Range = {0, 1000},
+    Increment = 1,
+    Suffix = "Speed",
+    CurrentValue = 0,
+    Flag = "TpwalkSpeedSlider",
+    Callback = function(Value)
+        -- Store value for use in TPWalk toggle
+        _G.tpWalkSpeed = Value
+    end
+})
+
+-- TPWalk toggle (Player tab)
+PlayerTab:CreateToggle({
+    Name = "TPWalk",
+    CurrentValue = false,
+    Flag = "TPWalkToggle",
+    Callback = function(Value)
+        _G.tpWalking = Value
+        if not Value then return end
+        local hb = game:GetService("RunService").Heartbeat
+        local chr = game.Players.LocalPlayer.Character
+        local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+        while _G.tpWalking and chr and hum and hum.Parent do
+            local delta = hb:Wait()
+            if hum.MoveDirection.Magnitude > 0 then
+                chr:TranslateBy(hum.MoveDirection * delta * (_G.tpWalkSpeed or 0))
+            end
+        end
+    end
+})
+
+-- Inf Jump toggle (Player tab)
+PlayerTab:CreateToggle({
+    Name = "Inf Jump",
+    CurrentValue = false,
+    Flag = "InfJumpToggle",
+    Callback = function(Value)
+        _G.InfiniteJumpEnabled = Value
+        if Value then
+            game:GetService("UserInputService").JumpRequest:Connect(function()
+                if _G.InfiniteJumpEnabled then
+                    local humanoid = game:GetService("Players").LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                    if humanoid then
+                        humanoid:ChangeState("Jumping")
+                    end
+                end
+            end)
+        end
+    end
+})
+
+-- Noclip toggle (Player tab)
+PlayerTab:CreateToggle({
+    Name = "Noclip",
+    CurrentValue = false,
+    Flag = "NoclipToggle",
+    Callback = function(Value)
+        _G.NoclipEnabled = Value
+        if Value then
+            local runService = game:GetService("RunService")
+            local player = game:GetService("Players").LocalPlayer
+            runService.Stepped:Connect(function()
+                if _G.NoclipEnabled and player.Character then
+                    for i, v in pairs(player.Character:GetDescendants()) do
+                        if v:IsA("BasePart") then
+                            v.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+    end
+})
+
+-- Full Bright toggle (Player tab)
+PlayerTab:CreateToggle({
+    Name = "Full Bright",
+    CurrentValue = false,
+    Flag = "FullBrightToggle",
+    Callback = function(Value)
+        _G.FullBrightEnabled = Value
+        local Lighting = game:GetService("Lighting")
+        if Value then
+            Lighting.Ambient = Color3.new(1, 1, 1)
+            Lighting.ColorShift_Bottom = Color3.new(1, 1, 1)
+            Lighting.ColorShift_Top = Color3.new(1, 1, 1)
+        else
+            Lighting.Ambient = Color3.new(0, 0, 0)
+            Lighting.ColorShift_Bottom = Color3.new(0, 0, 0)
+            Lighting.ColorShift_Top = Color3.new(0, 0, 0)
+        end
+    end
+})
