@@ -324,7 +324,7 @@ HealingTab:CreateToggle({
 -- Instant Kill Range slider (Combat tab)
 CombatTab:CreateSlider({
     Name = "Instant Kill Range",
-    Range = {0, 300},
+    Range = {0, 120},
     Increment = 1,
     Suffix = "Range",
     CurrentValue = 40,
