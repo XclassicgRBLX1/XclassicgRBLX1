@@ -71,7 +71,7 @@ game.Players.LocalPlayer:SetAttribute("WaitScriptEnd", false)
 
 -- Create Rayfield window
 local Window = Rayfield:CreateWindow({
-    Name = "Humbled4 Hub | Survive In Area 51",
+    Name = "Humbled4 Hub Alpha | Survive In Area 51",
     LoadingTitle = "Humbled4 Hub",
     LoadingSubtitle = "By XclassicgRBLX",
     ConfigurationSaving = {
@@ -152,7 +152,7 @@ local shotgun = GunModifierTab:CreateSlider({
 
 -- MODIFIED!! button (Gun Modifier tab)
 GunModifierTab:CreateButton({
-    Name = "MODIFIED!!",
+    Name = "MODIFIED!! (unequip the gun u put the name of it to make it work)",
     Callback = function()
         -- Play sound on button click
         local sound = Instance.new("Sound", game.Workspace)
@@ -324,7 +324,7 @@ HealingTab:CreateToggle({
 -- Instant Kill Range slider (Combat tab)
 CombatTab:CreateSlider({
     Name = "Instant Kill Range",
-    Range = {0, 120},
+    Range = {0, 160},
     Increment = 1,
     Suffix = "Range",
     CurrentValue = 40,
@@ -404,7 +404,7 @@ CombatTab:CreateToggle({
                             Duration = 5
                         })
                     end)
-                    task.wait(0.5) -- Increased delay for better performance
+                    task.wait(0.3) -- Increased delay for better performance
                 end
             end)
         else
