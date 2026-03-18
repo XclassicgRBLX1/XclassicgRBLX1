@@ -995,6 +995,17 @@ function Nexus:CreateWindow(opts)
         local Tab={Btn=tabBtn,Page=page,Lbl=tabLbl,Ind=ind,_name=name,Badge=badge,BadgeLbl=badgeLbl}
         table.insert(W.Tabs,Tab)
 
+        -- SetBadge MUST be defined before SelTab (which calls Tab:SetBadge)
+        function Tab:SetBadge(n)
+            if n and n>0 then
+                badgeLbl.Text=tostring(n>99 and "99+" or n)
+                badge.Visible=true
+                TweenSp(badge,.3,{Size=UDim2.new(0,16,0,16)})
+            else
+                badge.Visible=false
+            end
+        end
+
         local function SelTab()
             if W.ActiveTab and W.ActiveTab~=Tab then
                 local old=W.ActiveTab
@@ -1024,16 +1035,6 @@ function Nexus:CreateWindow(opts)
             if W.ActiveTab~=Tab then TweenQ(tabBtn,.12,{BackgroundTransparency=1}) end
         end)
         if #W.Tabs==1 then SelTab() end
-
-        function Tab:SetBadge(n)
-            if n and n>0 then
-                badgeLbl.Text=tostring(n>99 and "99+" or n)
-                badge.Visible=true
-                TweenSp(badge,.3,{Size=UDim2.new(0,16,0,16)})
-            else
-                badge.Visible=false
-            end
-        end
 
         -- ────────────────────────────────────────
         --  A D D   S E C T I O N
