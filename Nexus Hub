@@ -59,7 +59,8 @@ local function TweenC(o,t,s,d,p)
 end
 local function TweenSp(o,t,p)
     if not o or not o.Parent then return end
-    TweenService:Create(o,TweenInfo.new(t,Enum.EasingStyle.Spring,Enum.EasingDirection.Out),p):Play()
+    -- Enum.EasingStyle.Spring does NOT exist in Roblox; use Back for overshoot feel
+    TweenService:Create(o,TweenInfo.new(t,Enum.EasingStyle.Back,Enum.EasingDirection.Out),p):Play()
 end
 
 local function New(cls, props)
@@ -82,6 +83,38 @@ local function Round(v,s) s=s or 1; return math.floor(v/s+.5)*s end
 local function Hex(c) return string.format("%02X%02X%02X",c.R*255,c.G*255,c.B*255) end
 local function TSize(txt,sz)
     return TextService:GetTextSize(txt,sz,Enum.Font.Gotham,Vector2.new(9999,9999))
+end
+
+-- ══════════════════════════════════════════════
+--  U I   S C A L E   (responsive / mobile)
+-- ══════════════════════════════════════════════
+-- Scales the entire GUI down on small / mobile screens.
+-- Reference design resolution = 1280 x 720 (standard PC).
+local DESIGN_W, DESIGN_H = 1280, 720
+
+local function ApplyScale(sg)
+    local uiScale = New("UIScale",{Scale=1, Parent=sg})
+    local function Update()
+        local cam = workspace.CurrentCamera
+        local vp  = cam and cam.ViewportSize or Vector2.new(DESIGN_W, DESIGN_H)
+        local sc  = math.min(vp.X/DESIGN_W, vp.Y/DESIGN_H)
+        sc = Clamp(sc, 0.45, 1.0)   -- floor at 45% for tiny screens, cap at 100% on PC
+        uiScale.Scale = sc
+    end
+    Update()
+    local vpConn
+    local function WatchCam()
+        if workspace.CurrentCamera then
+            if vpConn then pcall(function() vpConn:Disconnect() end) end
+            vpConn = workspace.CurrentCamera
+                :GetPropertyChangedSignal("ViewportSize"):Connect(Update)
+        end
+    end
+    WatchCam()
+    workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+        WatchCam(); Update()
+    end)
+    return uiScale
 end
 
 -- Ripple effect on a frame
@@ -224,6 +257,7 @@ function Nexus:LoadingScreen(opts)
     local showList = opts.ShowTaskList ~= false  -- show task checklist by default
 
     local sg = MakeGui(99999)
+    ApplyScale(sg)
 
     -- ── Full backdrop ──────────────────────────
     local bg = New("Frame",{
@@ -581,6 +615,7 @@ function Nexus:CreateWindow(opts)
               or Nexus.Themes[opts.Theme] or Nexus.Themes.Dark
 
     local sg = MakeGui()
+    ApplyScale(sg)
 
     -- Blur backdrop
     local blur
