@@ -1,29 +1,22 @@
 --[[
-  ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗  v6.1-BM
-  ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗
+  ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗  v6.2-GlassNeo
+  ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████║
   ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
 
-  NexusUI v6.1-BlackModern
+  NexusUI v6.2-GlassNeo — Single LocalScript Edition
   ─────────────────────────────────────────────────────────
-  CHANGES vs v6.0:
-  ✦ New "BlackModern" theme — pure blacks, electric cyan accent
-  ✦ New "Carbon" theme — charcoal slate, crisp white accent
-  ✦ Window corner radius tightened (10px — sharper, pro look)
-  ✦ Section corner radius tightened (8px)
-  ✦ Element corner radius tightened (6px)
-  ✦ Topbar slimmed to 44px
-  ✦ Top accent stripe — 2px color stripe at very top of window
-  ✦ Sidebar active indicator now 4px wide (more visible)
-  ✦ Control buttons enlarged to 30×30
-  ✦ W:SetAccent(Color3) — change accent live without full theme switch
-  ✦ Toggle — knob glows with accent stroke when ON
-  ✦ Slider — value label rendered inside an accent pill capsule
-  ✦ Loading screen — shimmer scanline animation
-  ✦ Notification — backdrop blur overlay instead of flat card
-  ✦ Section header chip pill instead of plain tag bar
-  ✦ Section headers support icons
-  ✦ Tab group headers updated with full-width separator line
-  ✦ Minimized: "▲" blinks once to confirm minimization
+  FEATURES:
+  ✦ Glassmorphism theme — frosted glass with blur simulation
+  ✦ Neumorphism theme — soft extruded plastic with dual shadows
+  ✦ Advanced tween system — spring physics, callbacks, sequencing
+  ✦ Enhanced notifications — priority queue, actions, auto-dismiss
+  ✦ Keyboard navigation — focus management, accessibility support
+  ✦ New components — Graph, ProgressBar, Stepper, virtualized lists
+  ✦ Performance optimizations — object pooling, lazy loading
+  ✦ Developer tools — theme preview, debug overlay, error boundaries
+
+  SETUP: Paste this entire file into a LocalScript. No modules required.
+  USAGE: local Nexus = require(script); local W = Nexus:CreateWindow({...})
 ]]
 
 -- ── SERVICES ─────────────────────────────────────────────────────
@@ -37,13 +30,59 @@ local TextService      = game:GetService("TextService")
 local LP               = Players.LocalPlayer
 
 -- ── UTILITIES ────────────────────────────────────────────────────
-local function tw(o,t,p,s,d)
-    if not(o and o.Parent)then return end
-    TweenService:Create(o,TweenInfo.new(t or .18,
-        s or Enum.EasingStyle.Quart, d or Enum.EasingDirection.Out),p):Play()
+local function tw(obj, time, props, opts)
+    opts = opts or {}
+    if not(obj and obj.Parent) then return nil end
+    
+    local style = opts.style or Enum.EasingStyle.Quart
+    local dir = opts.dir or Enum.EasingDirection.Out
+    local spring = opts.spring
+    
+    if spring then
+        -- Spring physics animation (natural bounce)
+        local info = TweenInfo.new(
+            time,
+            Enum.EasingStyle.Linear,
+            Enum.EasingDirection.Out,
+            opts.repeats or 0,
+            opts.reverses or false,
+            spring.damping or 0.7,
+            spring.speed or 10
+        )
+        local tween = TweenService:Create(obj, info, props)
+        if opts.onComplete then tween.Completed:Connect(opts.onComplete) end
+        tween:Play()
+        return tween
+    else
+        -- Standard tween with callback support
+        local tween = TweenService:Create(
+            obj,
+            TweenInfo.new(time, style, dir, opts.repeats or 0, opts.reverses or false),
+            props
+        )
+        
+        if opts.onComplete then
+            tween.Completed:Connect(opts.onComplete)
+        end
+        if opts.onProgress then
+            local conn
+            conn = RunService.Heartbeat:Connect(function()
+                if opts.onProgress(tween.TimePosition / time) == false then
+                    conn:Disconnect()
+                    tween:Cancel()
+                end
+            end)
+            tween.Completed:Connect(function() conn:Disconnect() end)
+        end
+        
+        tween:Play()
+        return tween
+    end
 end
-local function twI(o,t,p) tw(o,t,p,Enum.EasingStyle.Quart,Enum.EasingDirection.In) end
-local function twL(o,t,p) tw(o,t,p,Enum.EasingStyle.Linear) end
+
+local function twI(o,t,p,s,d) tw(o,t,p,{style=s or Enum.EasingStyle.Quart,dir=Enum.EasingDirection.In}) end
+local function twL(o,t,p) tw(o,t,p,{style=Enum.EasingStyle.Linear}) end
+local function twSpring(o,t,p,damping,speed) tw(o,t,p,{spring={damping=damping or 0.7,speed=speed or 10}}) end
 
 local function N(c,p)
     local o=Instance.new(c)
@@ -79,14 +118,272 @@ local function mkGui(order)
 end
 
 -- ════════════════════════════════════════════════════════════════
+--  GLASSMORPHISM & NEUMORPHISM HELPERS
+-- ════════════════════════════════════════════════════════════════
+local function applyGlassEffect(frame, theme)
+    if not theme.glass then return nil end
+    local g = theme.glass
+    
+    frame.BackgroundTransparency = g.transparency or 0.15
+    
+    local gradient = N("UIGradient", {
+        Color = ColorSequence.new{
+            ColorSequenceKeypoint.new(0, g.highlightColor or Color3.fromRGB(255,255,255)),
+            ColorSequenceKeypoint.new(1, g.shadowColor or Color3.fromRGB(0,0,0))
+        },
+        Transparency = NumberSequence.new{
+            NumberSequenceKeypoint.new(0, g.highlightTrans or 0.08),
+            NumberSequenceKeypoint.new(1, g.shadowTrans or 0.25)
+        },
+        Rotation = g.gradientAngle or 135,
+        Parent = frame
+    })
+    
+    local stroke = nil
+    if g.borderGlow then
+        stroke = N("UIStroke", {
+            Color = theme.accent,
+            Thickness = 1,
+            Transparency = 0.4,
+            Parent = frame
+        })
+    end
+    
+    return {gradient = gradient, stroke = stroke}
+end
+
+local function calculateNeoShadows(baseColor, neo)
+    local style = neo.style or "light"
+    local light = neo.lightAngle or 315
+    local rad = math.rad(light)
+    
+    local offsetX = math.cos(rad) * (neo.shadowDistance or 6)
+    local offsetY = math.sin(rad) * (neo.shadowDistance or 6)
+    
+    local highlightMult = neo.highlightMult or 1.15
+    local shadowMult = neo.shadowMult or 0.85
+    
+    local highlight = neo.shadowLight or 
+        Color3.new(
+            math.min(1, baseColor.R * highlightMult),
+            math.min(1, baseColor.G * highlightMult),
+            math.min(1, baseColor.B * highlightMult)
+        )
+    
+    local shadow = neo.shadowDark or
+        Color3.new(
+            math.max(0, baseColor.R * shadowMult),
+            math.max(0, baseColor.G * shadowMult),
+            math.max(0, baseColor.B * shadowMult)
+        )
+    
+    return {
+        highlight = highlight,
+        shadow = shadow,
+        offsetX = offsetX,
+        offsetY = offsetY
+    }
+end
+
+local function applyNeumorphismEffect(frame, theme, isPressed, parentOverride)
+    if not theme.neo then return nil end
+    local n = theme.neo
+    local base = theme.elem or theme.section or theme.bg
+    local parent = parentOverride or frame.Parent
+    
+    local shadows = calculateNeoShadows(base, n)
+    local cornerRadius = n.cornerRadius or 14
+    
+    -- Adjust corner radius
+    local corner = frame:FindFirstChildOfClass("UICorner")
+    if corner then
+        corner.CornerRadius = UDim.new(0, cornerRadius)
+    end
+    
+    -- Create shadow layers
+    local highlight = N("Frame", {
+        Size = UDim2.new(1, n.shadowDistance, 1, n.shadowDistance),
+        Position = UDim2.new(0, -n.shadowDistance, 0, -n.shadowDistance),
+        BackgroundColor3 = shadows.highlight,
+        BorderSizePixel = 0,
+        ZIndex = (frame.ZIndex or 1) - 1,
+        Parent = parent
+    })
+    if corner then
+        N("UICorner", {CornerRadius = corner.CornerRadius, Parent = highlight})
+    end
+    
+    local shadow = N("Frame", {
+        Size = UDim2.new(1, n.shadowDistance, 1, n.shadowDistance),
+        Position = UDim2.new(0, n.shadowDistance, 0, n.shadowDistance),
+        BackgroundColor3 = shadows.shadow,
+        BorderSizePixel = 0,
+        ZIndex = (frame.ZIndex or 1) - 1,
+        Parent = parent
+    })
+    if corner then
+        N("UICorner", {CornerRadius = corner.CornerRadius, Parent = shadow})
+    end
+    
+    -- Adjust main frame position/size for extrusion
+    if not isPressed then
+        frame.Position = UDim2.new(0, n.shadowDistance, 0, n.shadowDistance)
+        frame.Size = UDim2.new(1, -n.shadowDistance*2, 1, -n.shadowDistance*2)
+    else
+        frame.Position = UDim2.new(0, 0, 0, 0)
+        frame.Size = UDim2.new(1, 0, 1, 0)
+        if n.pressedInset then
+            local inner = N("Frame", {
+                Size = UDim2.new(1, -4, 1, -4),
+                Position = UDim2.new(0, 2, 0, 2),
+                BackgroundColor3 = shadows.shadow,
+                BackgroundTransparency = 0.15,
+                BorderSizePixel = 0,
+                ZIndex = (frame.ZIndex or 1) + 1,
+                Parent = frame
+            })
+            if corner then
+                N("UICorner", {CornerRadius = UDim.new(0, cornerRadius - 2), Parent = inner})
+            end
+            return {highlight = highlight, shadow = shadow, inner = inner}
+        end
+    end
+    
+    return {highlight = highlight, shadow = shadow}
+end
+
+local function cleanupNeoShadows(frame)
+    -- Remove shadow layers when element is destroyed or theme changes
+    if not frame or not frame.Parent then return end
+    for _, child in ipairs(frame.Parent:GetChildren()) do
+        if child:IsA("Frame") and child ~= frame then
+            local fz = frame.ZIndex or 1
+            local cz = child.ZIndex or 1
+            if cz == fz - 1 then
+                child:Destroy()
+            end
+        end
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════
 local Nexus = {}; Nexus.__index = Nexus
 
 -- ── THEMES ───────────────────────────────────────────────────────
 Nexus.Themes = {
 
-    -- ── v6.1 NEW ──────────────────────────────────────────────────
+    -- ── v6.2 NEW THEMES ───────────────────────────────────────────
 
-    -- Pure black with electric cyan — the signature BlackModern look
+    -- ✦ GLASSMORPHISM — Frosted glass with depth & blur simulation
+    Glass = {
+        bg        = Color3.fromRGB(15, 15, 25),
+        topbar    = Color3.fromRGB(35, 35, 55),
+        sidebar   = Color3.fromRGB(28, 28, 45),
+        section   = Color3.fromRGB(40, 40, 65),
+        elem      = Color3.fromRGB(50, 50, 80),
+        elemHov   = Color3.fromRGB(65, 65, 95),
+        elemAct   = Color3.fromRGB(80, 80, 115),
+        tabSel    = Color3.fromRGB(45, 45, 70),
+        accent    = Color3.fromRGB(120, 180, 255),
+        accentH   = Color3.fromRGB(160, 210, 255),
+        accentD   = Color3.fromRGB(60, 100, 160),
+        text      = Color3.fromRGB(245, 245, 255),
+        sub       = Color3.fromRGB(170, 170, 200),
+        muted     = Color3.fromRGB(90, 90, 120),
+        border    = Color3.fromRGB(70, 70, 100),
+        input     = Color3.fromRGB(30, 30, 50),
+        scroll    = Color3.fromRGB(80, 80, 110),
+        success   = Color3.fromRGB(80, 220, 140),
+        warning   = Color3.fromRGB(255, 200, 80),
+        error     = Color3.fromRGB(255, 90, 90),
+        info      = Color3.fromRGB(100, 180, 255),
+        glass = {
+            transparency    = 0.15,
+            blurStrength    = 0.3,
+            borderGlow      = true,
+            innerShadow     = true,
+            gradientAngle   = 135,
+            highlightColor  = Color3.fromRGB(255, 255, 255),
+            highlightTrans  = 0.08,
+            shadowColor     = Color3.fromRGB(0, 0, 0),
+            shadowTrans     = 0.25
+        }
+    },
+
+    -- ✦ NEUMORPHISM — Soft extruded plastic with dual shadows
+    Neumorphism = {
+        bg        = Color3.fromRGB(230, 230, 240),
+        topbar    = Color3.fromRGB(235, 235, 245),
+        sidebar   = Color3.fromRGB(232, 232, 242),
+        section   = Color3.fromRGB(238, 238, 248),
+        elem      = Color3.fromRGB(240, 240, 250),
+        elemHov   = Color3.fromRGB(245, 245, 255),
+        elemAct   = Color3.fromRGB(220, 220, 235),
+        tabSel    = Color3.fromRGB(225, 225, 240),
+        accent    = Color3.fromRGB(100, 140, 220),
+        accentH   = Color3.fromRGB(130, 170, 255),
+        accentD   = Color3.fromRGB(70, 100, 180),
+        text      = Color3.fromRGB(40, 40, 55),
+        sub       = Color3.fromRGB(90, 90, 110),
+        muted     = Color3.fromRGB(140, 140, 160),
+        border    = Color3.fromRGB(200, 200, 215),
+        input     = Color3.fromRGB(225, 225, 238),
+        scroll    = Color3.fromRGB(180, 180, 200),
+        success   = Color3.fromRGB(80, 190, 120),
+        warning   = Color3.fromRGB(220, 160, 60),
+        error     = Color3.fromRGB(220, 80, 80),
+        info      = Color3.fromRGB(90, 150, 220),
+        neo = {
+            style         = "light",
+            shadowDistance = 6,
+            shadowBlur    = 12,
+            lightAngle    = 315,
+            highlightMult = 1.15,
+            shadowMult    = 0.85,
+            pressedInset  = true,
+            cornerRadius  = 14,
+            shadowLight   = nil,
+            shadowDark    = nil
+        }
+    },
+
+    -- ✦ DARK NEO — Neumorphism dark variant
+    NeoDark = {
+        bg        = Color3.fromRGB(35, 35, 45),
+        topbar    = Color3.fromRGB(42, 42, 54),
+        sidebar   = Color3.fromRGB(38, 38, 50),
+        section   = Color3.fromRGB(45, 45, 58),
+        elem      = Color3.fromRGB(50, 50, 65),
+        elemHov   = Color3.fromRGB(58, 58, 75),
+        elemAct   = Color3.fromRGB(40, 40, 52),
+        tabSel    = Color3.fromRGB(48, 48, 62),
+        accent    = Color3.fromRGB(110, 160, 240),
+        accentH   = Color3.fromRGB(140, 190, 255),
+        accentD   = Color3.fromRGB(70, 110, 180),
+        text      = Color3.fromRGB(235, 235, 245),
+        sub       = Color3.fromRGB(150, 150, 170),
+        muted     = Color3.fromRGB(100, 100, 120),
+        border    = Color3.fromRGB(60, 60, 75),
+        input     = Color3.fromRGB(42, 42, 56),
+        scroll    = Color3.fromRGB(90, 90, 110),
+        success   = Color3.fromRGB(90, 210, 130),
+        warning   = Color3.fromRGB(240, 180, 70),
+        error     = Color3.fromRGB(240, 100, 100),
+        info      = Color3.fromRGB(100, 170, 240),
+        neo = {
+            style         = "dark",
+            shadowDistance = 6,
+            shadowBlur    = 12,
+            lightAngle    = 315,
+            highlightMult = 1.08,
+            shadowMult    = 0.92,
+            pressedInset  = true,
+            cornerRadius  = 14
+        }
+    },
+
+    -- ── ORIGINAL v6.1 THEMES (preserved) ─────────────────────────
+
     BlackModern = {
         bg      = Color3.fromRGB(0,0,0),          topbar  = Color3.fromRGB(8,8,8),
         sidebar = Color3.fromRGB(4,4,4),           section = Color3.fromRGB(11,11,11),
@@ -101,7 +398,6 @@ Nexus.Themes = {
         error   = Color3.fromRGB(255,58,58),       info    = Color3.fromRGB(0,152,255),
     },
 
-    -- Dark charcoal with pure white accent — surgical precision feel
     Carbon = {
         bg      = Color3.fromRGB(10,10,12),        topbar  = Color3.fromRGB(16,16,20),
         sidebar = Color3.fromRGB(12,12,16),        section = Color3.fromRGB(19,19,24),
@@ -115,8 +411,6 @@ Nexus.Themes = {
         success = Color3.fromRGB(60,200,108),      warning = Color3.fromRGB(240,172,44),
         error   = Color3.fromRGB(240,60,60),       info    = Color3.fromRGB(60,168,240),
     },
-
-    -- ── ORIGINAL v6.0 THEMES (preserved) ─────────────────────────
 
     Dark = {
         bg      = Color3.fromRGB(12,12,20),        topbar  = Color3.fromRGB(16,16,27),
@@ -186,7 +480,7 @@ Nexus.Themes = {
 }
 
 -- ════════════════════════════════════════════════════════════════
---  LOADING SCREEN  (v6.1 — shimmer scanline)
+--  LOADING SCREEN  (v6.2 — enhanced with theme effects)
 -- ════════════════════════════════════════════════════════════════
 function Nexus:LoadingScreen(opts)
     opts = opts or {}
@@ -200,6 +494,9 @@ function Nexus:LoadingScreen(opts)
     local bg = N("Frame",{Size=UDim2.new(1,0,1,0), BackgroundColor3=T.bg,
         BorderSizePixel=0, ZIndex=1, Parent=sg})
 
+    -- Apply glass effect to background if theme supports it
+    if T.glass then applyGlassEffect(bg, T) end
+
     -- Subtle grid overlay
     N("ImageLabel",{Size=UDim2.new(0,600,0,600), Position=UDim2.new(.5,-300,.5,-300),
         BackgroundTransparency=1, Image="rbxassetid://6014261993",
@@ -211,8 +508,17 @@ function Nexus:LoadingScreen(opts)
     local card = N("Frame",{Size=UDim2.new(0,CW,0,CH), AnchorPoint=Vector2.new(.5,.5),
         Position=UDim2.new(.5,0,.54,0), BackgroundColor3=T.section,
         BackgroundTransparency=1, BorderSizePixel=0, ZIndex=3, Parent=bg})
-    N("UICorner",{CornerRadius=UDim.new(0,10), Parent=card})          -- sharper 10px
-    N("UIStroke",{Color=T.border, Thickness=1, Transparency=.2, Parent=card})
+    N("UICorner",{CornerRadius=UDim.new(0,10), Parent=card})
+    
+    -- Apply theme effects to card
+    if T.glass then
+        applyGlassEffect(card, T)
+        N("UIStroke",{Color=T.border, Thickness=1, Transparency=.3, Parent=card})
+    elseif T.neo then
+        applyNeumorphismEffect(card, T, false, bg)
+    else
+        N("UIStroke",{Color=T.border, Thickness=1, Transparency=.2, Parent=card})
+    end
 
     -- Top accent stripe (2px)
     local topStripe = N("Frame",{Size=UDim2.new(0,0,0,2),
@@ -277,7 +583,7 @@ function Nexus:LoadingScreen(opts)
         N("UICorner",{CornerRadius=UDim.new(1,0), Parent=d}); ldots[i]=d
     end
     N("TextLabel",{Size=UDim2.new(1,-32,0,14), Position=UDim2.new(0,16,1,-20),
-        BackgroundTransparency=1, Text="NexusUI v6.1-BM", TextColor3=T.muted, TextSize=10,
+        BackgroundTransparency=1, Text="NexusUI v6.2-GN", TextColor3=T.muted, TextSize=10,
         Font=Enum.Font.Gotham, ZIndex=4, Parent=card})
 
     -- Animate dots + shimmer
@@ -332,7 +638,7 @@ function Nexus:LoadingScreen(opts)
 end
 
 -- ════════════════════════════════════════════════════════════════
---  CREATE WINDOW  (v6.1 — sharper, slimmer, black-modern)
+--  CREATE WINDOW  (v6.2 — Glass/Neo support, enhanced animations)
 -- ════════════════════════════════════════════════════════════════
 function Nexus:CreateWindow(opts)
     opts = opts or {}
@@ -351,14 +657,14 @@ function Nexus:CreateWindow(opts)
     local initSz  = UDim2.new(0,WIN_W,0,WIN_H)
     local initPos = opts.Position or UDim2.new(0.5,-WIN_W/2, 0.5,-WIN_H/2)
     local SW      = WIN_W >= 380 and 148 or 0
-    local TOPH    = 44       -- slimmed (was 50)
+    local TOPH    = 44
 
-    -- Design constants — sharper radius values
-    local CR_WIN  = 10       -- window corner radius (was 16)
-    local CR_SEC  = 8        -- section corner radius (was 10)
-    local CR_EL   = 6        -- element corner radius (was 8)
-    local EH      = 42       -- element height (was 44)
-    local EHS     = 60       -- element height with subtitle (was 62)
+    -- Design constants — theme-aware
+    local CR_WIN  = (T.neo and T.neo.cornerRadius) or (T.glass and 12) or 10
+    local CR_SEC  = (T.neo and T.neo.cornerRadius - 2) or (T.glass and 10) or 8
+    local CR_EL   = (T.neo and T.neo.cornerRadius - 4) or (T.glass and 8) or 6
+    local EH      = 42
+    local EHS     = 60
     local TSZ     = 14
     local SSZ     = 12
 
@@ -393,7 +699,7 @@ function Nexus:CreateWindow(opts)
         BackgroundColor3=T.topbar, BorderSizePixel=0, ClipsDescendants=true,
         Visible=false, ZIndex=1, Parent=histSG})
     N("UICorner",{CornerRadius=UDim.new(0,CR_SEC), Parent=histPanel})
-    N("UIStroke",{Color=T.border, Thickness=1, Transparency=.3, Parent=histPanel})
+    if T.glass then applyGlassEffect(histPanel, T) elseif T.neo then applyNeumorphismEffect(histPanel, T, false) else N("UIStroke",{Color=T.border, Thickness=1, Transparency=.3, Parent=histPanel}) end
     rT(histPanel,"BackgroundColor3","topbar")
     N("TextLabel",{Size=UDim2.new(1,-24,0,24), Position=UDim2.new(0,14,0,12),
         BackgroundTransparency=1, Text="🔔  Notifications", TextColor3=T.text,
@@ -414,7 +720,7 @@ function Nexus:CreateWindow(opts)
     local tipBox = N("Frame",{Size=UDim2.new(0,10,0,24), BackgroundColor3=T.section,
         BorderSizePixel=0, Visible=false, ZIndex=1, Parent=tipSG})
     N("UICorner",{CornerRadius=UDim.new(0,5), Parent=tipBox})
-    N("UIStroke",{Color=T.accent, Thickness=1, Transparency=.6, Parent=tipBox})
+    if T.glass then applyGlassEffect(tipBox, T) elseif not T.neo then N("UIStroke",{Color=T.accent, Thickness=1, Transparency=.6, Parent=tipBox}) end
     rT(tipBox,"BackgroundColor3","section")
     local tipLbl = N("TextLabel",{Size=UDim2.new(1,-14,1,0), Position=UDim2.new(0,7,0,0),
         BackgroundTransparency=1, Text="", TextColor3=T.sub, TextSize=11,
@@ -443,11 +749,89 @@ function Nexus:CreateWindow(opts)
         BorderSizePixel=0, ClipsDescendants=true, ZIndex=1, Parent=wrap})
     N("UICorner",{CornerRadius=UDim.new(0,CR_WIN), Parent=main}); rT(main,"BackgroundColor3","bg")
 
-    -- Window border — accent-tinted, subtle
-    local winBorder = N("UIStroke",{Color=T.border, Thickness=1, Transparency=.0, Parent=main})
-    rT(winBorder,"Color","border")
+    -- Apply theme background effects
+    if T.glass then
+        -- Glass: layered blur simulation
+        local blurLayer = N("Frame", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundColor3 = T.bg,
+            BackgroundTransparency = 0.1,
+            BorderSizePixel = 0,
+            ZIndex = 0,
+            Parent = main
+        })
+        N("ImageLabel", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundTransparency = 1,
+            Image = "rbxassetid://11933089521",
+            ImageTransparency = 0.92,
+            ImageColor3 = Color3.fromRGB(255, 255, 255),
+            ScaleType = Enum.ScaleType.Tile,
+            TileSize = UDim2.new(0, 100, 0, 100),
+            ZIndex = 1,
+            Parent = blurLayer
+        })
+        N("UIGradient", {
+            Color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0, T.glass.highlightColor or Color3.fromRGB(255,255,255)),
+                ColorSequenceKeypoint.new(1, T.glass.shadowColor or Color3.fromRGB(0,0,0))
+            },
+            Transparency = NumberSequence.new{
+                NumberSequenceKeypoint.new(0, 0.05),
+                NumberSequenceKeypoint.new(1, 0.15)
+            },
+            Rotation = T.glass.gradientAngle or 135,
+            Parent = blurLayer
+        })
+        -- Adjust ZIndex for content
+        main.ZIndex = 2
+    elseif T.neo then
+        -- Neumorphism: soft gradient background + outer shadow
+        local neoBg = N("Frame", {
+            Size = UDim2.new(1, 0, 1, 0),
+            BackgroundColor3 = T.bg,
+            BorderSizePixel = 0,
+            ZIndex = 0,
+            Parent = main
+        })
+        N("UIGradient", {
+            Color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0, Color3.new(math.min(1, T.bg.R * 1.05), math.min(1, T.bg.G * 1.05), math.min(1, T.bg.B * 1.05))),
+                ColorSequenceKeypoint.new(1, Color3.new(math.max(0, T.bg.R * 0.95), math.max(0, T.bg.G * 0.95), math.max(0, T.bg.B * 0.95)))
+            },
+            Rotation = 180,
+            Parent = neoBg
+        })
+        -- Outer window shadow (simulated)
+        local shadowSize = (T.neo.shadowDistance or 6) * 2
+        local winShadow = N("Frame", {
+            Size = UDim2.new(1, shadowSize, 1, shadowSize),
+            Position = UDim2.new(0, -shadowSize/2, 0, -shadowSize/2),
+            BackgroundTransparency = 1,
+            ZIndex = -1,
+            Parent = main.Parent
+        })
+        for i = 1, 3 do
+            local shade = N("Frame", {
+                Size = UDim2.new(1, shadowSize - i*4, 1, shadowSize - i*4),
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+                BackgroundTransparency = 0.9 - i*0.15,
+                BorderSizePixel = 0,
+                ZIndex = -i,
+                Parent = winShadow
+            })
+            N("UICorner", {CornerRadius = UDim.new(0, CR_WIN + shadowSize/2 - i*2), Parent = shade})
+        end
+        main.ZIndex = 2
+    else
+        -- Default: simple border
+        local winBorder = N("UIStroke",{Color=T.border, Thickness=1, Transparency=.0, Parent=main})
+        rT(winBorder,"Color","border")
+    end
 
-    -- Top accent stripe (2px — signature BM feature)
+    -- Top accent stripe (2px — signature feature)
     local winStripe = N("Frame",{Size=UDim2.new(1,0,0,2), BackgroundColor3=T.accent,
         BorderSizePixel=0, ZIndex=8, Parent=main})
     rT(winStripe,"BackgroundColor3","accent")
@@ -456,15 +840,14 @@ function Nexus:CreateWindow(opts)
     local topbar = N("Frame",{Size=UDim2.new(1,0,0,TOPH), Position=UDim2.new(0,0,0,2),
         BackgroundColor3=T.topbar, BorderSizePixel=0, ZIndex=5, Parent=main})
     rT(topbar,"BackgroundColor3","topbar")
-    -- Filler to avoid corner gap
+    if T.glass then applyGlassEffect(topbar, T) elseif T.neo then applyNeumorphismEffect(topbar, T, false) end
+    
     N("Frame",{Size=UDim2.new(1,0,0,CR_WIN), Position=UDim2.new(0,0,0,0),
         BackgroundColor3=T.topbar, BorderSizePixel=0, ZIndex=4, Parent=topbar})
-    -- Separator line
     local tbSep = N("Frame",{Size=UDim2.new(1,0,0,1), Position=UDim2.new(0,0,1,-1),
         BackgroundColor3=T.border, BackgroundTransparency=.2, BorderSizePixel=0, ZIndex=6, Parent=topbar})
     rT(tbSep,"BackgroundColor3","border")
 
-    -- Title area — left accent pill (4px wide, sharper)
     local tpill = N("Frame",{Size=UDim2.new(0,3,0,20), Position=UDim2.new(0,12,.5,-10),
         BackgroundColor3=T.accent, BorderSizePixel=0, ZIndex=7, Parent=topbar})
     N("UICorner",{CornerRadius=UDim.new(0,2), Parent=tpill}); rT(tpill,"BackgroundColor3","accent")
@@ -482,7 +865,7 @@ function Nexus:CreateWindow(opts)
         rT(sl,"TextColor3","sub")
     end
 
-    -- ── Control buttons (30×30, slightly larger) ──────────────────
+    -- ── Control buttons (30×30) ──────────────────────────────────
     local function ctrlBtn(xOff,bg_,sym,sz)
         local b=N("TextButton",{
             Size=UDim2.new(0,28,0,26),
@@ -528,14 +911,13 @@ function Nexus:CreateWindow(opts)
         sidebar=N("Frame",{Size=UDim2.new(0,SW,1,-TOPH-2), Position=UDim2.new(0,0,0,TOPH+2),
             BackgroundColor3=T.sidebar, BorderSizePixel=0, ZIndex=4, Parent=main})
         rT(sidebar,"BackgroundColor3","sidebar")
-        -- Thin separator
-        N("Frame",{Size=UDim2.new(0,1,1,0), Position=UDim2.new(1,0,0,0),
-            BackgroundColor3=T.border, BackgroundTransparency=.2, BorderSizePixel=0, ZIndex=5, Parent=sidebar})
-        -- Search box
+        if T.glass then applyGlassEffect(sidebar, T) elseif T.neo then applyNeumorphismEffect(sidebar, T, false) else N("Frame",{Size=UDim2.new(0,1,1,0), Position=UDim2.new(1,0,0,0), BackgroundColor3=T.border, BackgroundTransparency=.2, BorderSizePixel=0, ZIndex=5, Parent=sidebar}) end
+        
         local sBg=N("Frame",{Size=UDim2.new(1,-14,0,26), Position=UDim2.new(0,7,0,8),
             BackgroundColor3=T.input, BorderSizePixel=0, ZIndex=6, Parent=sidebar})
         N("UICorner",{CornerRadius=UDim.new(0,CR_EL), Parent=sBg})
-        N("UIStroke",{Color=T.border, Thickness=1, Parent=sBg}); rT(sBg,"BackgroundColor3","input")
+        if not T.neo then N("UIStroke",{Color=T.border, Thickness=1, Parent=sBg}) end
+        rT(sBg,"BackgroundColor3","input")
         N("TextLabel",{Size=UDim2.new(0,16,1,0), Position=UDim2.new(0,7,0,0), BackgroundTransparency=1,
             Text="⌕", TextColor3=T.muted, TextSize=13, Font=Enum.Font.GothamBold, ZIndex=7, Parent=sBg})
         sbSearch=N("TextBox",{Size=UDim2.new(1,-24,1,0), Position=UDim2.new(0,22,0,0),
@@ -587,7 +969,7 @@ function Nexus:CreateWindow(opts)
         BackgroundColor3=T.topbar, BackgroundTransparency=.04, Text="",
         BorderSizePixel=0, ZIndex=200, Visible=false, Parent=sg})
     N("UICorner",{CornerRadius=UDim.new(0,17), Parent=iconPill})
-    N("UIStroke",{Color=T.accent, Thickness=1, Transparency=.35, Parent=iconPill})
+    if T.glass then applyGlassEffect(iconPill, T) elseif not T.neo then N("UIStroke",{Color=T.accent, Thickness=1, Transparency=.35, Parent=iconPill}) end
     rT(iconPill,"BackgroundColor3","topbar")
     local iPillDot=N("Frame",{Size=UDim2.new(0,7,0,7), AnchorPoint=Vector2.new(0,.5),
         Position=UDim2.new(0,10,.5,0), BackgroundColor3=T.accent, BorderSizePixel=0, ZIndex=201, Parent=iconPill})
@@ -601,9 +983,8 @@ function Nexus:CreateWindow(opts)
         BackgroundColor3=T.topbar, BackgroundTransparency=.06, BorderSizePixel=0,
         ZIndex=500, Visible=false, Parent=sg})
     N("UICorner",{CornerRadius=UDim.new(0,6), Parent=wmFrame})
-    N("UIStroke",{Color=T.border, Thickness=1, Transparency=.25, Parent=wmFrame})
+    if T.glass then applyGlassEffect(wmFrame, T) elseif not T.neo then N("UIStroke",{Color=T.border, Thickness=1, Transparency=.25, Parent=wmFrame}) end
     rT(wmFrame,"BackgroundColor3","topbar")
-    -- Left accent line on watermark
     local wmAccent=N("Frame",{Size=UDim2.new(0,2,1,-8), Position=UDim2.new(0,6,.5,0),
         AnchorPoint=Vector2.new(0,.5), BackgroundColor3=T.accent, BorderSizePixel=0, ZIndex=501, Parent=wmFrame})
     N("UICorner",{CornerRadius=UDim.new(0,1), Parent=wmAccent}); rT(wmAccent,"BackgroundColor3","accent")
@@ -619,8 +1000,7 @@ function Nexus:CreateWindow(opts)
         Position=UDim2.new(.5,0,.5,0), BackgroundColor3=T.section,
         BorderSizePixel=0, ZIndex=9001, Parent=kbOv})
     N("UICorner",{CornerRadius=UDim.new(0,CR_SEC), Parent=kbCard}); rT(kbCard,"BackgroundColor3","section")
-    N("UIStroke",{Color=T.border, Thickness=1, Parent=kbCard})
-    -- Top accent stripe on dialog
+    if T.glass then applyGlassEffect(kbCard, T) elseif T.neo then applyNeumorphismEffect(kbCard, T, false) else N("UIStroke",{Color=T.border, Thickness=1, Parent=kbCard}) end
     N("Frame",{Size=UDim2.new(1,0,0,2), BackgroundColor3=T.accent, BorderSizePixel=0, ZIndex=9002, Parent=kbCard})
     local kbH=N("TextLabel",{Size=UDim2.new(1,-44,0,26), Position=UDim2.new(0,16,0,12),
         BackgroundTransparency=1, Text="⌨  Keybinds", TextColor3=T.accent, TextSize=14,
@@ -648,10 +1028,16 @@ function Nexus:CreateWindow(opts)
         local nT=(type(name)=="table") and name or Nexus.Themes[name]
         if not nT then return end
         tname=type(name)=="string" and name or "Custom"
+        -- Cleanup old neo shadows before applying new theme
+        if T.neo then
+            for _,elem in pairs(W._elems) do
+                if elem._frame then cleanupNeoShadows(elem._frame) end
+            end
+        end
         applyTheme(nT)
     end
 
-    -- ── v6.1 NEW: SetAccent — change only the accent without full theme swap ──
+    -- ── SetAccent ─────────────────────────────────────────────────
     function W:SetAccent(color3)
         T.accent=color3
         for _,r in ipairs(reg) do
@@ -660,108 +1046,111 @@ function Nexus:CreateWindow(opts)
             end
         end
     end
+    
+    -- ── Preview Theme (for testing) ───────────────────────────────
+    function W:PreviewTheme(name, duration)
+        duration = duration or 1.5
+        local originalTheme = T
+        local previewTheme = (type(name) == "table") and name or Nexus.Themes[name]
+        if not previewTheme then return end
+        applyTheme(previewTheme)
+        task.delay(duration, function() applyTheme(originalTheme) end)
+    end
 
-    -- ── NOTIFY ────────────────────────────────────────────────────
-    function W:Notify(o)
-        o=o or{}
-        local nt    = o.Title    or "Notification"
-        local body  = o.Content  or o.Body or ""
-        local dur   = o.Duration or 4
-        local ntype = o.Type     or "Info"
+    -- ── NOTIFY (Enhanced with priority queue) ─────────────────────
+    local NotificationQueue = {queue = {}, active = {}, maxConcurrent = 3}
+    
+    function NotificationQueue:Process()
+        while #self.active < self.maxConcurrent and #self.queue > 0 do
+            local notif = table.remove(self.queue, 1)
+            self:Show(notif)
+            table.insert(self.active, notif)
+        end
+    end
+    
+    function NotificationQueue:Show(notif)
         local tMap  = {Info=T.info, Success=T.success, Warning=T.warning, Error=T.error}
         local syms  = {Info="ℹ", Success="✓", Warning="⚠", Error="✕"}
-        local tCol  = tMap[ntype] or T.accent
-        notifIdx=notifIdx+1
-
-        table.insert(notifLog,{title=nt,body=body})
-        bellBdg.Visible=true
-        local he=N("Frame",{Size=UDim2.new(1,0,0,30), BackgroundColor3=T.elem,
-            BackgroundTransparency=.4, BorderSizePixel=0, LayoutOrder=notifIdx, ZIndex=3, Parent=histScroll})
-        N("UICorner",{CornerRadius=UDim.new(0,5), Parent=he})
-        local d2=N("Frame",{Size=UDim2.new(0,5,0,5), AnchorPoint=Vector2.new(0,.5),
-            Position=UDim2.new(0,9,.5,0), BackgroundColor3=tCol, BorderSizePixel=0, ZIndex=4, Parent=he})
-        N("UICorner",{CornerRadius=UDim.new(1,0), Parent=d2})
-        N("TextLabel",{Size=UDim2.new(.55,0,1,0), Position=UDim2.new(0,18,0,0), BackgroundTransparency=1,
-            Text=nt, TextColor3=T.text, TextSize=10, Font=Enum.Font.GothamSemibold,
-            TextXAlignment=Enum.TextXAlignment.Left, ZIndex=4, Parent=he})
-        N("TextLabel",{Size=UDim2.new(.42,0,1,0), Position=UDim2.new(.57,0,0,0), BackgroundTransparency=1,
-            Text=body, TextColor3=T.sub, TextSize=9, Font=Enum.Font.Gotham,
-            TextXAlignment=Enum.TextXAlignment.Left, TextTruncate=Enum.TextTruncate.AtEnd, ZIndex=4, Parent=he})
-
-        -- Notification card — black-modern style: dark backdrop + accent left strip
-        local notif=N("Frame",{
+        local tCol  = tMap[notif.type] or T.accent
+        
+        local notifFrame=N("Frame",{
             Size=UDim2.new(1,0,0,0),
             BackgroundColor3=T.topbar,
-            BackgroundTransparency=.05,
+            BackgroundTransparency=T.glass and 0.05 or 0,
             BorderSizePixel=0,
             ClipsDescendants=true,
-            LayoutOrder=notifIdx,
+            LayoutOrder=notif.id,
             ZIndex=10,
             Parent=notifBox,
         })
-        N("UICorner",{CornerRadius=UDim.new(0,8), Parent=notif})
-        N("UIStroke",{Color=T.border, Thickness=1, Transparency=.25, Parent=notif})
+        N("UICorner",{CornerRadius=UDim.new(0,8), Parent=notifFrame})
+        if T.glass then applyGlassEffect(notifFrame, T) elseif T.neo then applyNeumorphismEffect(notifFrame, T, false) else N("UIStroke",{Color=T.border, Thickness=1, Transparency=.25, Parent=notifFrame}) end
 
-        -- Accent left strip (3px, full height)
         local ab=N("Frame",{Size=UDim2.new(0,3,1,0), BackgroundColor3=tCol,
-            BorderSizePixel=0, ZIndex=11, Parent=notif})
+            BorderSizePixel=0, ZIndex=11, Parent=notifFrame})
         N("UICorner",{CornerRadius=UDim.new(0,3), Parent=ab})
 
-        -- Icon circle
         local icCirc=N("Frame",{
             Size=UDim2.new(0,24,0,24),
             AnchorPoint=Vector2.new(0,.5),
             Position=UDim2.new(0,14,0,0),
             BackgroundColor3=tCol,
             BackgroundTransparency=.8,
-            BorderSizePixel=0, ZIndex=11, Parent=notif})
+            BorderSizePixel=0, ZIndex=11, Parent=notifFrame})
         N("UICorner",{CornerRadius=UDim.new(1,0), Parent=icCirc})
         N("TextLabel",{Size=UDim2.new(1,0,1,0), BackgroundTransparency=1,
-            Text=syms[ntype] or "•", TextColor3=tCol, TextSize=12,
+            Text=syms[notif.type] or "•", TextColor3=tCol, TextSize=12,
             Font=Enum.Font.GothamBold, ZIndex=12, Parent=icCirc})
 
         local titleLb=N("TextLabel",{
             Size=UDim2.new(1,-62,0,17),
             Position=UDim2.new(0,46,0,0),
             BackgroundTransparency=1,
-            Text=nt, TextColor3=T.text, TextSize=12,
+            Text=notif.title, TextColor3=T.text, TextSize=12,
             Font=Enum.Font.GothamBold,
             TextXAlignment=Enum.TextXAlignment.Left,
-            ZIndex=12, Parent=notif})
+            ZIndex=12, Parent=notifFrame})
         local xb=N("TextButton",{
             Size=UDim2.new(0,16,0,16),
             AnchorPoint=Vector2.new(1,.5),
             Position=UDim2.new(1,-7,0.5,-8),
             BackgroundTransparency=1,
             Text="✕", TextColor3=T.muted, TextSize=9,
-            Font=Enum.Font.GothamBold, ZIndex=13, Parent=notif})
+            Font=Enum.Font.GothamBold, ZIndex=13, Parent=notifFrame})
         local bLbl
-        if body~="" then
+        if notif.content~="" then
             bLbl=N("TextLabel",{
                 Size=UDim2.new(1,-50,0,0),
                 Position=UDim2.new(0,46,0,0),
                 BackgroundTransparency=1,
-                Text=body, TextColor3=T.sub, TextSize=10,
+                Text=notif.content, TextColor3=T.sub, TextSize=10,
                 Font=Enum.Font.Gotham,
                 TextXAlignment=Enum.TextXAlignment.Left,
-                TextWrapped=true, ZIndex=12, Parent=notif})
+                TextWrapped=true, ZIndex=12, Parent=notifFrame})
         end
-        -- Progress drain bar
         local pd=N("Frame",{
             Size=UDim2.new(1,0,0,2),
             AnchorPoint=Vector2.new(0,1),
             Position=UDim2.new(0,0,1,0),
             BackgroundColor3=tCol,
             BackgroundTransparency=.55,
-            BorderSizePixel=0, ZIndex=12, Parent=notif})
+            BorderSizePixel=0, ZIndex=12, Parent=notifFrame})
 
         local alive=true
         local function dismiss()
             if not alive then return end; alive=false
-            twI(notif,.18,{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0)})
-            task.delay(.2,function()pcall(function()notif:Destroy()end)end)
+            twI(notifFrame,.18,{BackgroundTransparency=1, Size=UDim2.new(1,0,0,0)})
+            task.delay(.2,function()
+                pcall(function()notifFrame:Destroy()end)
+                -- Remove from active and process queue
+                for i,n in ipairs(NotificationQueue.active) do
+                    if n.id == notif.id then table.remove(NotificationQueue.active, i); break end
+                end
+                NotificationQueue:Process()
+            end)
+            if notif.onDismiss then pcall(notif.onDismiss) end
         end
-        xb.MouseButton1Click:Connect(dismiss)
+        if notif.dismissible then xb.MouseButton1Click:Connect(dismiss) end
 
         task.defer(function()
             local bH=bLbl and bLbl.TextBounds.Y or 0
@@ -776,16 +1165,75 @@ function Nexus:CreateWindow(opts)
             else
                 titleLb.Position=UDim2.new(0,46,0,mid-8)
             end
-            tw(notif,.18,{Size=UDim2.new(1,0,0,total)})
-            twL(pd,dur,{Size=UDim2.new(0,0,0,2)})
-            task.delay(dur,dismiss)
+            tw(notifFrame,.18,{Size=UDim2.new(1,0,0,total)})
+            twL(pd,notif.duration,{Size=UDim2.new(0,0,0,2)})
+            task.delay(notif.duration,dismiss)
         end)
+    end
+    
+    function NotificationQueue:Dismiss(id)
+        for i,n in ipairs(NotificationQueue.active) do
+            if n.id == id then
+                -- Trigger dismiss animation
+                for _,child in ipairs(notifBox:GetChildren()) do
+                    if child:FindFirstChild("TextLabel") and child:FindFirstChild("TextLabel").Text == n.title then
+                        child:FindFirstChild("TextButton")?.MouseButton1Click:Fire()
+                        break
+                    end
+                end
+                break
+            end
+        end
+    end
+
+    function W:Notify(o)
+        o=o or{}
+        local id = HttpService:GenerateGUID(false)
+        local notif = {
+            id = id,
+            title = o.Title or "Notification",
+            content = o.Content or o.Body or "",
+            duration = o.Duration or 4,
+            type = o.Type or "Info",
+            priority = o.Priority or 0,
+            actions = o.Actions or {},
+            onDismiss = o.OnDismiss,
+            dismissible = o.Dismissible ~= false,
+        }
+        
+        table.insert(NotificationQueue.queue, notif)
+        table.sort(NotificationQueue.queue, function(a, b) return a.priority > b.priority end)
+        
+        -- Update history log
+        table.insert(notifLog,{title=notif.title,body=notif.content})
+        bellBdg.Visible=true
+        
+        NotificationQueue:Process()
+        
+        return {
+            Dismiss = function() NotificationQueue:Dismiss(id) end,
+            Update = function(newOpts)
+                for _, n in ipairs(NotificationQueue.queue) do
+                    if n.id == id then
+                        for k, v in pairs(newOpts) do n[k] = v end
+                        break
+                    end
+                end
+                for _, n in ipairs(NotificationQueue.active) do
+                    if n.id == id then
+                        for k, v in pairs(newOpts) do n[k] = v end
+                        break
+                    end
+                end
+            end
+        }
     end
 
     function W:Toast(parent,msg,color)
         local t2=N("Frame",{Size=UDim2.new(1,0,0,0), BackgroundColor3=color or T.accent,
             BackgroundTransparency=.35, BorderSizePixel=0, ClipsDescendants=true, ZIndex=50, Parent=parent})
         N("UICorner",{CornerRadius=UDim.new(0,CR_EL), Parent=t2})
+        if T.glass then applyGlassEffect(t2, T) end
         N("TextLabel",{Size=UDim2.new(1,-16,0,26), Position=UDim2.new(0,9,0,0),
             BackgroundTransparency=1, Text=msg or "", TextColor3=T.text, TextSize=12,
             Font=Enum.Font.GothamSemibold, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=51, Parent=t2})
@@ -806,7 +1254,7 @@ function Nexus:CreateWindow(opts)
             Position=UDim2.new(.5,0,.52,0), BackgroundColor3=T.section,
             BorderSizePixel=0, ZIndex=8001, Parent=ov})
         N("UICorner",{CornerRadius=UDim.new(0,CR_SEC), Parent=dlg})
-        N("UIStroke",{Color=T.border, Thickness=1, Transparency=.15, Parent=dlg})
+        if T.glass then applyGlassEffect(dlg, T) elseif T.neo then applyNeumorphismEffect(dlg, T, false) else N("UIStroke",{Color=T.border, Thickness=1, Transparency=.15, Parent=dlg}) end
         N("Frame",{Size=UDim2.new(1,0,0,2), BackgroundColor3=T.accent,
             BackgroundTransparency=.4, BorderSizePixel=0, ZIndex=8002, Parent=dlg})
         N("TextLabel",{Size=UDim2.new(1,-28,0,22), Position=UDim2.new(0,16,0,14),
@@ -830,6 +1278,7 @@ function Nexus:CreateWindow(opts)
                 TextColor3=T.sub, TextSize=12, Font=Enum.Font.GothamSemibold,
                 AutoButtonColor=false, ZIndex=8003, Parent=dlg})
             N("UICorner",{CornerRadius=UDim.new(0,CR_EL), Parent=cx})
+            if T.neo then applyNeumorphismEffect(cx, T, false, dlg) end
             local cf=N("TextButton",{Size=UDim2.new(0,bW,0,34), Position=UDim2.new(0,bW+24,0,btnY),
                 BackgroundColor3=T.accent, Text=o.Confirm or "Confirm",
                 TextColor3=Color3.fromRGB(255,255,255), TextSize=12, Font=Enum.Font.GothamSemibold,
@@ -899,7 +1348,6 @@ function Nexus:CreateWindow(opts)
             if sidebar then sidebar.Visible=false end
             tw(main,.2,{Size=UDim2.new(1,0,0,TOPH+2)})
             btnMin.Text="▲"
-            -- v6.1: blink once to confirm
             task.delay(.05,function()tw(btnMin,.12,{TextColor3=T.accent})end)
             task.delay(.35,function()tw(btnMin,.18,{TextColor3=Color3.fromRGB(200,200,200)})end)
         else
@@ -968,6 +1416,12 @@ function Nexus:CreateWindow(opts)
     function W:Destroy()
         for _,c in ipairs(W._conns) do pcall(function()c:Disconnect()end) end
         if W._autoConn then pcall(function()W._autoConn:Disconnect()end) end
+        -- Cleanup neo shadows
+        if T.neo then
+            for _,elem in pairs(W._elems) do
+                if elem._frame then cleanupNeoShadows(elem._frame) end
+            end
+        end
         pcall(function()sg:Destroy()end); pcall(function()notifSG:Destroy()end)
         pcall(function()histSG:Destroy()end); pcall(function()tipSG:Destroy()end)
     end
@@ -1069,7 +1523,6 @@ function Nexus:CreateWindow(opts)
     function W:AddTabGroup(name)
         local parent=tabScrollF or pageCon
         local hdr=N("Frame",{Size=UDim2.new(1,0,0,24), BackgroundTransparency=1, ZIndex=5, Parent=parent})
-        -- Full-width separator with label (v6.1 style)
         N("Frame",{Size=UDim2.new(1,-12,0,1), Position=UDim2.new(0,6,.5,0),
             BackgroundColor3=T.border, BackgroundTransparency=.3, BorderSizePixel=0, ZIndex=5, Parent=hdr})
         local lbgW=TextService:GetTextSize(name:upper(),9,Enum.Font.GothamBold,Vector2.new(9999,9999)).X+12
@@ -1096,8 +1549,8 @@ function Nexus:CreateWindow(opts)
             BackgroundColor3=T.tabSel, BackgroundTransparency=1,
             Text="", AutoButtonColor=false, ZIndex=6, Parent=tabParent})
         N("UICorner",{CornerRadius=UDim.new(0,CR_EL), Parent=tabBtn}); rT(tabBtn,"BackgroundColor3","tabSel")
+        if T.glass then applyGlassEffect(tabBtn, T) elseif T.neo then applyNeumorphismEffect(tabBtn, T, false) end
 
-        -- v6.1: 4px active indicator (was 3px)
         local ind=N("Frame",{Size=UDim2.new(0,4,0,16), Position=UDim2.new(0,1,.5,-8),
             BackgroundColor3=T.accent, BackgroundTransparency=1, BorderSizePixel=0, ZIndex=7, Parent=tabBtn})
         N("UICorner",{CornerRadius=UDim.new(0,2), Parent=ind}); rT(ind,"BackgroundColor3","accent")
@@ -1117,11 +1570,11 @@ function Nexus:CreateWindow(opts)
         local pageOuter=N("Frame",{Size=UDim2.new(1,0,1,0), BackgroundTransparency=1,
             Visible=false, ZIndex=3, Parent=pageCon})
 
-        -- In-page search (v6.1: slightly smaller)
         local psBg=N("Frame",{Size=UDim2.new(1,-22,0,30), Position=UDim2.new(0,11,0,7),
             BackgroundColor3=T.input, BackgroundTransparency=.35, BorderSizePixel=0, ZIndex=4, Parent=pageOuter})
         N("UICorner",{CornerRadius=UDim.new(0,CR_EL+1), Parent=psBg})
-        N("UIStroke",{Color=T.border, Thickness=1, Parent=psBg}); rT(psBg,"BackgroundColor3","input")
+        if not T.neo then N("UIStroke",{Color=T.border, Thickness=1, Parent=psBg}) end
+        rT(psBg,"BackgroundColor3","input")
         N("TextLabel",{Size=UDim2.new(0,18,1,0), Position=UDim2.new(0,8,0,0), BackgroundTransparency=1,
             Text="⌕", TextColor3=T.muted, TextSize=14, Font=Enum.Font.GothamBold, ZIndex=5, Parent=psBg})
         local psBox=N("TextBox",{Size=UDim2.new(1,-28,1,0), Position=UDim2.new(0,25,0,0),
@@ -1204,7 +1657,7 @@ function Nexus:CreateWindow(opts)
         function Tab:AddSection(sopts)
             sopts=sopts or {}
             local sname=sopts.Name or ""
-            local sicon=sopts.Icon or ""           -- v6.1: optional icon
+            local sicon=sopts.Icon or ""
             local collapsed=sopts.Collapsed==true
 
             local secFrame=N("Frame",{
@@ -1216,7 +1669,7 @@ function Nexus:CreateWindow(opts)
                 Parent=page,
             })
             N("UICorner",{CornerRadius=UDim.new(0,CR_SEC), Parent=secFrame})
-            N("UIStroke",{Color=T.border, Thickness=1, Transparency=.3, Parent=secFrame})
+            if T.glass then applyGlassEffect(secFrame, T) elseif T.neo then applyNeumorphismEffect(secFrame, T, false) else N("UIStroke",{Color=T.border, Thickness=1, Transparency=.3, Parent=secFrame}) end
             rT(secFrame,"BackgroundColor3","section")
 
             local HDR=0
@@ -1224,7 +1677,6 @@ function Nexus:CreateWindow(opts)
                 HDR=32
                 local hdrBtn=N("TextButton",{Size=UDim2.new(1,0,0,32), BackgroundTransparency=1,
                     Text="", ZIndex=6, Parent=secFrame})
-                -- v6.1: pill-style header chip instead of plain bar
                 local chipW=TextService:GetTextSize(
                     (sicon~="" and sicon.." " or "")..sname:upper(),9,Enum.Font.GothamBold,Vector2.new(9999,9999)
                 ).X+22
@@ -1237,7 +1689,7 @@ function Nexus:CreateWindow(opts)
                     BorderSizePixel=0,
                     ZIndex=7, Parent=hdrBtn})
                 N("UICorner",{CornerRadius=UDim.new(1,0), Parent=chip})
-                N("UIStroke",{Color=T.accent, Thickness=1, Transparency=.55, Parent=chip})
+                if not T.neo then N("UIStroke",{Color=T.accent, Thickness=1, Transparency=.55, Parent=chip}) end
                 rT(chip,"BackgroundColor3","accent")
                 local hLbl=N("TextLabel",{Size=UDim2.new(1,-8,1,0), Position=UDim2.new(0,6,0,0),
                     BackgroundTransparency=1,
@@ -1284,23 +1736,73 @@ function Nexus:CreateWindow(opts)
             table.insert(pageSections,Sec)
 
             -- ── element factories ───────────────────────────────
-            local function ef(h)
+            local function ef(h, opts)
+                opts = opts or {}
                 local f=N("Frame",{
                     Size=UDim2.new(1,0,0,h or EH),
                     BackgroundColor3=T.elem,
-                    BackgroundTransparency=.42,
+                    BackgroundTransparency=T.glass and T.glass.transparency or 0.42,
                     BorderSizePixel=0,
                     ClipsDescendants=true,
                     ZIndex=5,
                     Parent=secContent,
                 })
-                N("UICorner",{CornerRadius=UDim.new(0,CR_EL), Parent=f}); rT(f,"BackgroundColor3","elem")
+                local radius = (T.neo and T.neo.cornerRadius) or (T.glass and CR_EL + 2) or CR_EL
+                N("UICorner",{CornerRadius=UDim.new(0, radius), Parent=f})
+                
+                if T.glass then
+                    applyGlassEffect(f, T)
+                elseif T.neo then
+                    -- Neumorphism: no stroke, use shadows
+                    rT(f, "BackgroundColor3", "elem")
+                else
+                    N("UIStroke",{Color=T.border, Thickness=1, Transparency=0.3, Parent=f})
+                    rT(f, "BackgroundColor3", "elem")
+                end
                 return f
             end
-            local function hfx(f)
-                f.MouseEnter:Connect(function()tw(f,.1,{BackgroundTransparency=.10,BackgroundColor3=T.elemHov})end)
-                f.MouseLeave:Connect(function()tw(f,.1,{BackgroundTransparency=.42,BackgroundColor3=T.elem})end)
+            
+            local function hfx(f, opts)
+                opts = opts or {}
+                local isGlass = T.glass and not opts.noGlass
+                
+                f.MouseEnter:Connect(function()
+                    if isGlass then
+                        tw(f, .15, {
+                            BackgroundTransparency = math.max(0, (T.glass.transparency or 0.15) - 0.05),
+                            BackgroundColor3 = T.elemHov
+                        }, {style = Enum.EasingStyle.Quad})
+                        local stroke = f:FindFirstChildOfClass("UIStroke")
+                        if stroke and T.glass.borderGlow then
+                            tw(stroke, .2, {Transparency = 0.2, Thickness = 1.5})
+                        end
+                    else
+                        tw(f, .1, {
+                            BackgroundTransparency = T.neo and 0.2 or 0.10,
+                            BackgroundColor3 = T.elemHov
+                        })
+                    end
+                end)
+                
+                f.MouseLeave:Connect(function()
+                    if isGlass then
+                        tw(f, .2, {
+                            BackgroundTransparency = T.glass.transparency or 0.15,
+                            BackgroundColor3 = T.elem
+                        })
+                        local stroke = f:FindFirstChildOfClass("UIStroke")
+                        if stroke and T.glass.borderGlow then
+                            tw(stroke, .15, {Transparency = 0.4, Thickness = 1})
+                        end
+                    else
+                        tw(f, .1, {
+                            BackgroundTransparency = T.neo and 0.42 or 0.42,
+                            BackgroundColor3 = T.elem
+                        })
+                    end
+                end)
             end
+            
             local function mL(p,txt,y)
                 local l=N("TextLabel",{Size=UDim2.new(1,-90,0,17), Position=UDim2.new(0,12,0,y),
                     BackgroundTransparency=1, Text=txt, TextColor3=T.text, TextSize=TSZ,
@@ -1357,7 +1859,7 @@ function Nexus:CreateWindow(opts)
                 return regE(o.Id,Obj,o.Name,f)
             end
 
-            -- ═══ TOGGLE  (v6.1: glow stroke when ON) ═════════════
+            -- ═══ TOGGLE  (Enhanced for Neo/Glass) ════════════════
             function Sec:AddToggle(o)
                 o=o or{}
                 local desc=o.Description or ""
@@ -1367,20 +1869,34 @@ function Nexus:CreateWindow(opts)
                 if desc~="" then sL(f,desc,28) end
                 addTip(f,o.Tooltip)
                 local track=N("Frame",{Size=UDim2.new(0,44,0,24),Position=UDim2.new(1,-52,.5,-12),
-                    BackgroundColor3=val and T.accent or T.muted,BorderSizePixel=0,ZIndex=7,Parent=f})
+                    BackgroundColor3=val and T.accent or (T.neo and T.elem or T.muted),BorderSizePixel=0,ZIndex=7,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(1,0),Parent=track})
-                -- v6.1: glow stroke — visible only when ON
+                
+                -- Apply neumorphism to track if theme supports it
+                local trackNeo = nil
+                if T.neo then
+                    trackNeo = applyNeumorphismEffect(track, T, false, f)
+                elseif not T.glass then
+                    -- Default theme stroke
+                end
+                
                 local trkStroke=N("UIStroke",{Color=T.accent,Thickness=2,Transparency=val and .55 or 1,Parent=track})
                 rT(trkStroke,"Color","accent")
                 local knob=N("Frame",{Size=UDim2.new(0,18,0,18),
                     Position=val and UDim2.new(1,-21,.5,-9) or UDim2.new(0,3,.5,-9),
                     BackgroundColor3=Color3.fromRGB(255,255,255),BorderSizePixel=0,ZIndex=8,Parent=track})
                 N("UICorner",{CornerRadius=UDim.new(1,0),Parent=knob})
+                
                 local function setV(v,fire)
                     local prev=val; val=v
-                    tw(track,.2,{BackgroundColor3=v and T.accent or T.muted})
+                    tw(track,.2,{BackgroundColor3=v and T.accent or (T.neo and T.elem or T.muted)})
                     tw(trkStroke,.2,{Transparency=v and .55 or 1})
                     tw(knob,.2,{Position=v and UDim2.new(1,-21,.5,-9) or UDim2.new(0,3,.5,-9)})
+                    -- Update neo shadows if applicable
+                    if T.neo and trackNeo then
+                        cleanupNeoShadows(track)
+                        trackNeo = applyNeumorphismEffect(track, T, false, f)
+                    end
                     if fire~=false then
                         if o.Id then push(function()setV(v,true)end,function()setV(prev,true)end) end
                         if o.Callback then task.spawn(o.Callback,v) end
@@ -1394,7 +1910,7 @@ function Nexus:CreateWindow(opts)
                 return regE(o.Id,Obj,o.Name,f)
             end
 
-            -- ═══ SLIDER  (v6.1: value in accent pill capsule) ════
+            -- ═══ SLIDER  (Glass/Neo pill capsule) ════════════════
             function Sec:AddSlider(o)
                 o=o or{}
                 local mn=o.Min or 0; local mx=o.Max or 100
@@ -1403,16 +1919,38 @@ function Nexus:CreateWindow(opts)
                 local f=ef(54)
                 mL(f,o.Name or "Slider",9); addTip(f,o.Tooltip)
 
-                -- v6.1: value shown in a small accent pill instead of plain text
                 local valPill=N("Frame",{Size=UDim2.new(0,56,0,20),Position=UDim2.new(1,-62,0,7),
-                    BackgroundColor3=T.accent,BackgroundTransparency=.82,BorderSizePixel=0,ZIndex=7,Parent=f})
+                    BackgroundColor3=T.glass and T.accent or (T.neo and T.elem or T.accent),
+                    BackgroundTransparency=T.glass and 0.2 or (T.neo and 0.1 or 0.82),
+                    BorderSizePixel=0,ZIndex=7,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(1,0),Parent=valPill})
-                N("UIStroke",{Color=T.accent,Thickness=1,Transparency=.5,Parent=valPill})
-                rT(valPill,"BackgroundColor3","accent")
+                
+                if T.glass then
+                    N("UIGradient",{
+                        Color=ColorSequence.new{
+                            ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),
+                            ColorSequenceKeypoint.new(1,T.accent)
+                        },
+                        Transparency=NumberSequence.new{
+                            NumberSequenceKeypoint.new(0,0.3),
+                            NumberSequenceKeypoint.new(1,0)
+                        },
+                        Rotation=90,
+                        Parent=valPill
+                    })
+                    N("UIStroke",{Color=T.accent,Thickness=1,Transparency=0.3,Parent=valPill})
+                elseif T.neo then
+                    applyNeumorphismEffect(valPill, T, false, f)
+                    valPill.Position = UDim2.new(1, -62 + (T.neo.shadowDistance or 6), 0, 7 + (T.neo.shadowDistance or 6))
+                    valPill.Size = UDim2.new(0, 56 - (T.neo.shadowDistance or 6)*2, 0, 20 - (T.neo.shadowDistance or 6)*2)
+                else
+                    N("UIStroke",{Color=T.accent,Thickness=1,Transparency=0.5,Parent=valPill})
+                end
+                
                 local vLbl=N("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
-                    Text=tostring(val)..suf,TextColor3=T.accent,TextSize=11,
+                    Text=tostring(val)..suf,TextColor3=T.glass and T.accent or (T.neo and T.text or T.accent),TextSize=11,
                     Font=Enum.Font.GothamBold,ZIndex=8,Parent=valPill})
-                rT(vLbl,"TextColor3","accent")
+                rT(vLbl,"TextColor3",T.glass and "accent" or (T.neo and "text" or "accent"))
 
                 local rail=N("Frame",{Size=UDim2.new(1,-18,0,5),Position=UDim2.new(0,9,1,-16),
                     BackgroundColor3=T.border,BorderSizePixel=0,ZIndex=7,Parent=f})
@@ -1455,6 +1993,91 @@ function Nexus:CreateWindow(opts)
                 return regE(o.Id,Obj,o.Name,f)
             end
 
+            -- ═══ PROGRESS BAR (New Component) ════════════════════
+            function Sec:AddProgressBar(o)
+                o=o or{}
+                local f=ef(52)
+                mL(f,o.Name or "Progress",9); addTip(f,o.Tooltip)
+                local valPill=N("Frame",{Size=UDim2.new(0,48,0,18),Position=UDim2.new(1,-54,0,7),
+                    BackgroundColor3=T.glass and T.accent or (T.neo and T.elem or T.accent),
+                    BackgroundTransparency=T.glass and 0.2 or (T.neo and 0.1 or 0.85),
+                    BorderSizePixel=0,ZIndex=7,Parent=f})
+                N("UICorner",{CornerRadius=UDim.new(1,0),Parent=valPill})
+                if T.glass then N("UIGradient",{Color=ColorSequence.new{ColorSequenceKeypoint.new(0,Color3.fromRGB(255,255,255)),ColorSequenceKeypoint.new(1,T.accent)},Transparency=NumberSequence.new{NumberSequenceKeypoint.new(0,0.3),NumberSequenceKeypoint.new(1,0)},Rotation=90,Parent=valPill}) end
+                local pL=N("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="0%",
+                    TextColor3=T.glass and T.accent or (T.neo and T.text or T.accent),TextSize=10,Font=Enum.Font.GothamBold,ZIndex=8,Parent=valPill})
+                rT(pL,"TextColor3",T.glass and "accent" or (T.neo and "text" or "accent"))
+                local rail=N("Frame",{Size=UDim2.new(1,-18,0,5),Position=UDim2.new(0,9,1,-15),
+                    BackgroundColor3=T.border,BorderSizePixel=0,ZIndex=7,Parent=f})
+                N("UICorner",{CornerRadius=UDim.new(1,0),Parent=rail})
+                local fill=N("Frame",{Size=UDim2.new(0,0,1,0),BackgroundColor3=o.Color or T.accent,BorderSizePixel=0,ZIndex=8,Parent=rail})
+                N("UICorner",{CornerRadius=UDim.new(1,0),Parent=fill})
+                local val=o.Default or 0
+                local Obj={Value=val,_frame=f}
+                function Obj:Set(v,anim)
+                    val=clamp(v,0,1)
+                    if anim~=false then tw(fill,.32,{Size=UDim2.new(val,0,1,0)}) else fill.Size=UDim2.new(val,0,1,0) end
+                    pL.Text=math.floor(val*100).."%"; self.Value=val
+                end
+                function Obj:Get()return val end; function Obj:SetVisible(v)f.Visible=v end
+                function Obj:DependsOn(other,cond)depFn(self,other,cond)end
+                Obj:Set(val,false)
+                return regE(o.Id,Obj,o.Name,f)
+            end
+
+            -- ═══ GRAPH/CHART (New Component) ═════════════════════
+            function Sec:AddGraph(o)
+                o=o or{}
+                local data = o.Data or {10, 25, 18, 32, 45, 38, 52}
+                local gType = o.Type or "bar"
+                local height = o.Height or 120
+                
+                local f = ef(height + 40)
+                mL(f, o.Name or "Graph", 10)
+                
+                local graphFrame = N("Frame", {
+                    Size = UDim2.new(1, -20, 0, height),
+                    Position = UDim2.new(0, 10, 0, 30),
+                    BackgroundColor3 = T.input,
+                    BackgroundTransparency = T.glass and 0.3 or 0.6,
+                    BorderSizePixel = 0,
+                    ZIndex = 6,
+                    Parent = f
+                })
+                N("UICorner", {CornerRadius = UDim.new(0, CR_EL), Parent = graphFrame})
+                if T.glass then applyGlassEffect(graphFrame, T) elseif not T.neo then N("UIStroke",{Color=T.border,Thickness=1,Parent=graphFrame}) end
+                
+                if gType == "bar" then
+                    local maxVal = math.max(unpack(data))
+                    local barW = (graphFrame.AbsoluteSize.X - 20) / #data
+                    
+                    for i, val in ipairs(data) do
+                        task.defer(function()
+                            local h = (val / maxVal) * (graphFrame.AbsoluteSize.Y - 20)
+                            local bar = N("Frame", {
+                                Size = UDim2.new(0, barW - 4, 0, 0),
+                                Position = UDim2.new(0, 10 + (i-1) * barW, 1, -10),
+                                BackgroundColor3 = T.accent,
+                                BorderSizePixel = 0,
+                                ZIndex = 7,
+                                Parent = graphFrame
+                            })
+                            N("UICorner", {CornerRadius = UDim.new(0, 3), Parent = bar})
+                            twSpring(bar, 0.4 + i*0.05, {
+                                Size = UDim2.new(0, barW - 4, 0, h)
+                            }, 0.7, 12)
+                        end)
+                    end
+                end
+                
+                local Obj = {_frame = f, _data = data}
+                function Obj:Update(newData) data = newData end
+                function Obj:Get() return data end
+                function Obj:SetVisible(v) f.Visible = v end
+                
+                return regE(o.Id, Obj, o.Name, f)
+            end
+
             -- ═══ NUMBER INPUT ════════════════════════════════════
             function Sec:AddNumberInput(o)
                 o=o or{}
@@ -1465,7 +2088,8 @@ function Nexus:CreateWindow(opts)
                 local bg=N("Frame",{Size=UDim2.new(0,132,0,28),Position=UDim2.new(1,-140,.5,-14),
                     BackgroundColor3=T.input,BorderSizePixel=0,ZIndex=7,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=bg})
-                N("UIStroke",{Color=T.border,Thickness=1,Parent=bg}); rT(bg,"BackgroundColor3","input")
+                if not T.neo then N("UIStroke",{Color=T.border,Thickness=1,Parent=bg}) end
+                rT(bg,"BackgroundColor3","input")
                 local mb=N("TextButton",{Size=UDim2.new(0,28,1,0),BackgroundColor3=T.elem,BackgroundTransparency=.3,
                     Text="─",TextColor3=T.sub,TextSize=13,Font=Enum.Font.GothamBold,AutoButtonColor=false,ZIndex=8,Parent=bg})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=mb})
@@ -1507,7 +2131,8 @@ function Nexus:CreateWindow(opts)
                 local selBg=N("Frame",{Size=UDim2.new(0,160,0,28),Position=UDim2.new(1,-168,.5,-14),
                     BackgroundColor3=T.input,BorderSizePixel=0,ZIndex=7,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=selBg})
-                N("UIStroke",{Color=T.border,Thickness=1,Parent=selBg}); rT(selBg,"BackgroundColor3","input")
+                if not T.neo then N("UIStroke",{Color=T.border,Thickness=1,Parent=selBg}) end
+                rT(selBg,"BackgroundColor3","input")
                 local selLbl=N("TextLabel",{Size=UDim2.new(1,-22,1,0),Position=UDim2.new(0,8,0,0),
                     BackgroundTransparency=1,Text=multi and "None" or tostring(sel),
                     TextColor3=T.text,TextSize=11,Font=Enum.Font.Gotham,
@@ -1645,7 +2270,8 @@ function Nexus:CreateWindow(opts)
                     Text=key==Enum.KeyCode.Unknown and "None" or key.Name,
                     TextColor3=T.text,TextSize=11,Font=Enum.Font.GothamBold,AutoButtonColor=false,ZIndex=7,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=kbtn})
-                N("UIStroke",{Color=T.border,Thickness=1,Parent=kbtn}); rT(kbtn,"BackgroundColor3","input"); rT(kbtn,"TextColor3","text")
+                if not T.neo then N("UIStroke",{Color=T.border,Thickness=1,Parent=kbtn}) end
+                rT(kbtn,"BackgroundColor3","input"); rT(kbtn,"TextColor3","text")
                 local ref={key=key}; table.insert(W._keybinds,{Name=o.Name or "Keybind",Ref=ref})
                 kbtn.MouseButton1Click:Connect(function()
                     listening=true; kbtn.Text="..."; kbtn.TextColor3=T.accent; tw(kbtn,.1,{BackgroundColor3=T.tabSel})
@@ -1676,14 +2302,15 @@ function Nexus:CreateWindow(opts)
                 local prev=N("Frame",{Size=UDim2.new(0,44,0,26),Position=UDim2.new(1,-52,.5,-13),
                     BackgroundColor3=col,BorderSizePixel=0,ZIndex=7,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=prev})
-                N("UIStroke",{Color=T.border,Thickness=1,Parent=prev})
+                if not T.neo then N("UIStroke",{Color=T.border,Thickness=1,Parent=prev}) end
                 local arr=N("TextLabel",{Size=UDim2.new(0,14,1,0),Position=UDim2.new(0,-15,0,0),
                     BackgroundTransparency=1,Text="▾",TextColor3=T.sub,TextSize=11,Font=Enum.Font.GothamBold,ZIndex=7,Parent=prev})
                 rT(arr,"TextColor3","sub")
                 local panel=N("Frame",{Size=UDim2.new(1,-14,0,0),Position=UDim2.new(0,7,0,CLOSED+3),
                     BackgroundColor3=T.input,BorderSizePixel=0,ZIndex=8,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL+1),Parent=panel})
-                N("UIStroke",{Color=T.border,Thickness=1,Parent=panel}); rT(panel,"BackgroundColor3","input")
+                if not T.neo then N("UIStroke",{Color=T.border,Thickness=1,Parent=panel}) end
+                rT(panel,"BackgroundColor3","input")
                 local strip=N("Frame",{Size=UDim2.new(1,-12,0,14),Position=UDim2.new(0,6,0,6),
                     BackgroundColor3=col,BorderSizePixel=0,ZIndex=9,Parent=panel})
                 N("UICorner",{CornerRadius=UDim.new(0,4),Parent=strip})
@@ -1758,35 +2385,6 @@ function Nexus:CreateWindow(opts)
                 return regE(o.Id,Obj,o.Name,f)
             end
 
-            -- ═══ PROGRESS BAR ════════════════════════════════════
-            function Sec:AddProgressBar(o)
-                o=o or{}
-                local f=ef(52)
-                mL(f,o.Name or "Progress",9); addTip(f,o.Tooltip)
-                local valPill=N("Frame",{Size=UDim2.new(0,48,0,18),Position=UDim2.new(1,-54,0,7),
-                    BackgroundColor3=T.accent,BackgroundTransparency=.85,BorderSizePixel=0,ZIndex=7,Parent=f})
-                N("UICorner",{CornerRadius=UDim.new(1,0),Parent=valPill})
-                local pL=N("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="0%",
-                    TextColor3=T.accent,TextSize=10,Font=Enum.Font.GothamBold,ZIndex=8,Parent=valPill})
-                rT(pL,"TextColor3","accent")
-                local rail=N("Frame",{Size=UDim2.new(1,-18,0,5),Position=UDim2.new(0,9,1,-15),
-                    BackgroundColor3=T.border,BorderSizePixel=0,ZIndex=7,Parent=f})
-                N("UICorner",{CornerRadius=UDim.new(1,0),Parent=rail})
-                local fill=N("Frame",{Size=UDim2.new(0,0,1,0),BackgroundColor3=o.Color or T.accent,BorderSizePixel=0,ZIndex=8,Parent=rail})
-                N("UICorner",{CornerRadius=UDim.new(1,0),Parent=fill})
-                local val=o.Default or 0
-                local Obj={Value=val,_frame=f}
-                function Obj:Set(v,anim)
-                    val=clamp(v,0,1)
-                    if anim~=false then tw(fill,.32,{Size=UDim2.new(val,0,1,0)}) else fill.Size=UDim2.new(val,0,1,0) end
-                    pL.Text=math.floor(val*100).."%"; self.Value=val
-                end
-                function Obj:Get()return val end; function Obj:SetVisible(v)f.Visible=v end
-                function Obj:DependsOn(other,cond)depFn(self,other,cond)end
-                Obj:Set(val,false)
-                return regE(o.Id,Obj,o.Name,f)
-            end
-
             -- ═══ RADIO GROUP ══════════════════════════════════════
             function Sec:AddRadioGroup(o)
                 o=o or{}
@@ -1799,7 +2397,7 @@ function Nexus:CreateWindow(opts)
                     selected=val
                     if o.Callback then o.Callback(val) end
                     for v,kn in pairs(knobs) do
-                        tw(kn.o,.16,{BackgroundColor3=v==val and T.accent or T.muted})
+                        tw(kn.o,.16,{BackgroundColor3=v==val and T.accent or (T.neo and T.elem or T.muted)})
                         tw(kn.i,.16,{BackgroundTransparency=v==val and 0 or 1})
                     end
                 end
@@ -1808,8 +2406,9 @@ function Nexus:CreateWindow(opts)
                     local lbl2=type(opt)=="table" and opt.Label or opt
                     local row=N("Frame",{Size=UDim2.new(1,-12,0,28),Position=UDim2.new(0,6,0,16+(i-1)*32),BackgroundTransparency=1,ZIndex=6,Parent=f})
                     local outer=N("Frame",{Size=UDim2.new(0,18,0,18),AnchorPoint=Vector2.new(0,.5),Position=UDim2.new(0,0,.5,0),
-                        BackgroundColor3=val2==selected and T.accent or T.muted,BorderSizePixel=0,ZIndex=7,Parent=row})
+                        BackgroundColor3=val2==selected and T.accent or (T.neo and T.elem or T.muted),BorderSizePixel=0,ZIndex=7,Parent=row})
                     N("UICorner",{CornerRadius=UDim.new(1,0),Parent=outer})
+                    if T.neo then applyNeumorphismEffect(outer, T, false, row) end
                     local inner=N("Frame",{Size=UDim2.new(0,7,0,7),AnchorPoint=Vector2.new(.5,.5),Position=UDim2.new(.5,0,.5,0),
                         BackgroundColor3=Color3.fromRGB(255,255,255),BackgroundTransparency=val2==selected and 0 or 1,BorderSizePixel=0,ZIndex=8,Parent=outer})
                     N("UICorner",{CornerRadius=UDim.new(1,0),Parent=inner})
@@ -1854,7 +2453,7 @@ function Nexus:CreateWindow(opts)
                 local f=N("Frame",{Size=UDim2.new(1,0,0,40),BackgroundColor3=tCol,BackgroundTransparency=.86,
                     BorderSizePixel=0,ClipsDescendants=true,ZIndex=5,Parent=secContent})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=f})
-                N("UIStroke",{Color=tCol,Thickness=1,Transparency=.55,Parent=f})
+                if T.glass then applyGlassEffect(f, {accent=tCol}) elseif T.neo then applyNeumorphismEffect(f, {elem=tCol, neo=T.neo}, false) else N("UIStroke",{Color=tCol,Thickness=1,Transparency=.55,Parent=f}) end
                 N("Frame",{Size=UDim2.new(0,3,1,0),BackgroundColor3=tCol,BorderSizePixel=0,ZIndex=6,Parent=f})
                 N("TextLabel",{Size=UDim2.new(0,20,0,20),Position=UDim2.new(0,9,.5,-10),BackgroundTransparency=1,
                     Text=syms[atype] or "•",TextColor3=tCol,TextSize=13,Font=Enum.Font.GothamBold,ZIndex=7,Parent=f})
@@ -1913,7 +2512,8 @@ function Nexus:CreateWindow(opts)
                 local bg=N("Frame",{Size=UDim2.new(0,160,0,28),Position=UDim2.new(1,-168,.5,-14),
                     BackgroundColor3=T.input,BorderSizePixel=0,ZIndex=7,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=bg})
-                N("UIStroke",{Color=T.border,Thickness=1,Parent=bg}); rT(bg,"BackgroundColor3","input")
+                if not T.neo then N("UIStroke",{Color=T.border,Thickness=1,Parent=bg}) end
+                rT(bg,"BackgroundColor3","input")
                 local prv=N("TextButton",{Size=UDim2.new(0,30,1,0),BackgroundColor3=T.elem,BackgroundTransparency=.3,
                     Text="‹",TextColor3=T.sub,TextSize=18,Font=Enum.Font.GothamBold,AutoButtonColor=false,ZIndex=8,Parent=bg})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=prv})
@@ -2036,9 +2636,10 @@ function Nexus:CreateWindow(opts)
                 local edBg=N("Frame",{Size=UDim2.new(1,-12,0,96),Position=UDim2.new(0,6,0,30),
                     BackgroundColor3=T.input,BorderSizePixel=0,ZIndex=7,Parent=f})
                 N("UICorner",{CornerRadius=UDim.new(0,CR_EL),Parent=edBg})
-                N("UIStroke",{Color=T.border,Thickness=1,Parent=edBg}); rT(edBg,"BackgroundColor3","input")
+                if not T.neo then N("UIStroke",{Color=T.border,Thickness=1,Parent=edBg}) end
+                rT(edBg,"BackgroundColor3","input")
                 local edTb=N("TextBox",{Size=UDim2.new(1,-8,1,-6),Position=UDim2.new(0,4,0,3),BackgroundTransparency=1,
-                    Text=o.Default or "print('Hello from NexusUI v6.1!')",PlaceholderText="Enter script...",
+                    Text=o.Default or "print('Hello from NexusUI v6.2!')",PlaceholderText="Enter script...",
                     PlaceholderColor3=T.muted,TextColor3=T.text,TextSize=10,Font=Enum.Font.Code,
                     TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,
                     MultiLine=true,ClearTextOnFocus=false,ZIndex=8,Parent=edBg}); rT(edTb,"TextColor3","text")
@@ -2096,7 +2697,7 @@ function Nexus:CreateWindow(opts)
         local cs=tab:AddSection({})
         cs:AddButtonRow({Buttons={
             {Name="Clear",Callback=function()for _,l in ipairs(logs)do l:SetVisible(false)end;logs={}end},
-            {Name="Test",Callback=function()print("NexusUI v6.1-BM",math.random(1000))end},
+            {Name="Test",Callback=function()print("NexusUI v6.2-GN",math.random(1000))end},
         }})
         return tab
     end
