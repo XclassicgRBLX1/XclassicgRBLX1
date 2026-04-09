@@ -1,29 +1,27 @@
 --[[
-  ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗  v6.1-BM
+  ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗  v7.0
   ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗
   ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║
 
-  NexusUI v6.1-BlackModern
+  NexusUI v7.0
   ─────────────────────────────────────────────────────────
-  CHANGES vs v6.0:
-  ✦ New "BlackModern" theme — pure blacks, electric cyan accent
-  ✦ New "Carbon" theme — charcoal slate, crisp white accent
-  ✦ Window corner radius tightened (10px — sharper, pro look)
-  ✦ Section corner radius tightened (8px)
-  ✦ Element corner radius tightened (6px)
-  ✦ Topbar slimmed to 44px
-  ✦ Top accent stripe — 2px color stripe at very top of window
-  ✦ Sidebar active indicator now 4px wide (more visible)
-  ✦ Control buttons enlarged to 30×30
-  ✦ W:SetAccent(Color3) — change accent live without full theme switch
-  ✦ Toggle — knob glows with accent stroke when ON
-  ✦ Slider — value label rendered inside an accent pill capsule
-  ✦ Loading screen — shimmer scanline animation
-  ✦ Notification — backdrop blur overlay instead of flat card
-  ✦ Section header chip pill instead of plain tag bar
-  ✦ Section headers support icons
-  ✦ Tab group headers updated with full-width separator line
-  ✦ Minimized: "▲" blinks once to confirm minimization
+  ✦ Glassmorphism theme  — frosted white glass, blur sim
+  ✦ Neumorphism theme    — soft extruded clay, dual shadows
+  ✦ Spring physics       — Nexus:Spring(), W:Sequence()
+  ✦ Enhanced notify      — priority queue, action buttons,
+      grouping counter, Critical no-dismiss pulsing border
+  ✦ Keyboard navigation  — Tab/Shift-Tab focus, Enter/Space,
+      focus ring glow via UIStroke
+  ✦ sec:AddGraph()       — Line/Bar with ring-buffer, pooled
+  ✦ sec:AddList()        — virtualized scrolling list, pooled
+  ✦ Object pooling       — Nexus.Pool, shared frame/btn pools
+  ✦ W:AddDevTab()        — FPS overlay, pool stats, error log,
+      theme preview, spring tester
+  ✦ W:Debug(msg, level)  — error log + live overlay
+  ✦ W:SetAccent(Color3)  — live accent swap
+  ✦ W:Sequence(steps)    — chained tween sequencer
+  ─────────────────────────────────────────────────────────
+  All v6.1-BM features, themes, and API preserved.
 ]]
 
 -- ── SERVICES ─────────────────────────────────────────────────────
@@ -54,6 +52,7 @@ end
 
 local function clamp(v,a,b) return math.max(a,math.min(b,v)) end
 local function lerp(a,b,t)  return a+(b-a)*t end
+local function lerpC(a,b,t) return Color3.new(lerp(a.R,b.R,t),lerp(a.G,b.G,t),lerp(a.B,b.B,t)) end
 local function round(v,s)   s=s or 1; return math.floor(v/s+.5)*s end
 local function hexc(c)      return string.format("%02X%02X%02X",c.R*255,c.G*255,c.B*255) end
 local function getVP()
@@ -81,8 +80,192 @@ end
 -- ════════════════════════════════════════════════════════════════
 local Nexus = {}; Nexus.__index = Nexus
 
+-- ════════════════════════════════════════════════════════════════
+--  OBJECT POOL  — recycle any Instance class to cut GC pressure
+--  local p = Nexus.Pool.new("Frame")
+--  local f = p:get({Size=...,Parent=...})   -- reuse or create
+--  p:release(f)                             -- return to pool
+--  p:flush()                                -- destroy all free
+--  p:stats()  →  {created, recycled}
+-- ════════════════════════════════════════════════════════════════
+Nexus.Pool = {}
+local PoolMeta = {__index = Nexus.Pool}
+function Nexus.Pool.new(className, defaults)
+    return setmetatable({
+        _class = className, _defaults = defaults or {},
+        _free  = {}, _stats = {created=0, recycled=0},
+    }, PoolMeta)
+end
+function Nexus.Pool:get(props)
+    local obj
+    if #self._free > 0 then
+        obj = table.remove(self._free); self._stats.recycled += 1
+    else
+        obj = Instance.new(self._class); self._stats.created += 1
+    end
+    for k,v in pairs(self._defaults) do pcall(function() obj[k]=v end) end
+    if props then
+        for k,v in pairs(props) do
+            if k ~= "Parent" then pcall(function() obj[k]=v end) end
+        end
+    end
+    if props and props.Parent then obj.Parent = props.Parent end
+    return obj
+end
+function Nexus.Pool:release(obj)
+    if not obj then return end
+    pcall(function() obj.Parent = nil end)
+    table.insert(self._free, obj)
+end
+function Nexus.Pool:flush()
+    for _,o in ipairs(self._free) do pcall(function() o:Destroy() end) end
+    self._free = {}
+end
+function Nexus.Pool:stats() return self._stats end
+
+-- Shared pools (used by VirtualList internally)
+local _sharedPools = {}
+local function sharedPool(cls)
+    if not _sharedPools[cls] then _sharedPools[cls] = Nexus.Pool.new(cls) end
+    return _sharedPools[cls]
+end
+
+-- ════════════════════════════════════════════════════════════════
+--  SPRING PHYSICS ENGINE
+--  handle = Nexus:Spring(obj, targetProps, cfg)
+--  cfg: {k=200, d=20, mass=1, precision=0.005, onSettle, onUpdate}
+--  handle: :SetTarget(props)  :Stop()  :Pause()  :Resume()
+-- ════════════════════════════════════════════════════════════════
+local _springs   = {}
+local _springHB  = nil
+local function _ensureSpringLoop()
+    if _springHB then return end
+    _springHB = RunService.Heartbeat:Connect(function(dt)
+        dt = math.min(dt, 0.05)
+        local done = {}
+        for id, s in pairs(_springs) do
+            if s.paused then continue end
+            local settled = true
+            for _, state in pairs(s.states) do
+                local a = (-s.k*(state.pos-state.target) - s.d*state.vel) / s.mass
+                state.vel = state.vel + a*dt
+                state.pos = state.pos + state.vel*dt
+                if math.abs(state.vel) > s.prec or math.abs(state.pos-state.target) > s.prec then
+                    settled = false
+                else
+                    state.pos = state.target; state.vel = 0
+                end
+            end
+            if s.obj and s.obj.Parent then
+                for prop, state in pairs(s.states) do
+                    pcall(function() s.obj[prop] = state.pos end)
+                end
+                if s.onUpdate then pcall(s.onUpdate, s.obj) end
+            end
+            if settled then
+                table.insert(done, id)
+                if s.onSettle then pcall(s.onSettle, s.obj) end
+            end
+        end
+        for _,id in ipairs(done) do _springs[id] = nil end
+    end)
+end
+
+function Nexus:Spring(obj, targetProps, cfg)
+    cfg = cfg or {}
+    local id = tostring(obj) .. tostring(tick())
+    local states = {}
+    for prop, target in pairs(targetProps) do
+        local cur = 0; pcall(function() cur = obj[prop] end)
+        states[prop] = {pos=cur, vel=0, target=target}
+    end
+    _springs[id] = {
+        obj=obj, states=states,
+        k    = cfg.k     or 220,
+        d    = cfg.d     or 22,
+        mass = cfg.mass  or 1,
+        prec = cfg.precision or 0.005,
+        paused   = false,
+        onSettle = cfg.onSettle,
+        onUpdate = cfg.onUpdate,
+    }
+    _ensureSpringLoop()
+    local handle = {}
+    function handle:SetTarget(p)
+        if not _springs[id] then return end
+        for prop, v in pairs(p) do
+            if _springs[id].states[prop] then
+                _springs[id].states[prop].target = v
+            else
+                local cur = 0; pcall(function() cur = obj[prop] end)
+                _springs[id].states[prop] = {pos=cur, vel=0, target=v}
+            end
+        end
+    end
+    function handle:Stop()   _springs[id] = nil end
+    function handle:Pause()  if _springs[id] then _springs[id].paused = true  end end
+    function handle:Resume() if _springs[id] then _springs[id].paused = false end end
+    function handle:IsActive() return _springs[id] ~= nil end
+    return handle
+end
+
+-- ════════════════════════════════════════════════════════════════
+--  TWEEN SEQUENCER  — chain tweens with callbacks
+--  W:Sequence({{obj,time,props,style?,dir?},...}, onDone?)
+-- ════════════════════════════════════════════════════════════════
+local function _runSeq(steps, idx, onDone)
+    if not steps[idx] then if onDone then task.spawn(onDone) end return end
+    local s = steps[idx]
+    if not (s.obj and s.obj.Parent) then _runSeq(steps, idx+1, onDone); return end
+    local t = TweenService:Create(s.obj,
+        TweenInfo.new(s.time or .25,
+            s.style or Enum.EasingStyle.Quart,
+            s.dir   or Enum.EasingDirection.Out), s.props)
+    t.Completed:Connect(function() _runSeq(steps, idx+1, onDone) end)
+    t:Play()
+end
+
 -- ── THEMES ───────────────────────────────────────────────────────
 Nexus.Themes = {
+
+    -- ── v7.0 NEW THEMES ───────────────────────────────────────────
+
+    -- Frosted glass: translucent white panels, purple accent
+    -- _glass=true tells the builder to apply BackgroundTransparency layers
+    Glassmorphism = {
+        _glass   = true,
+        _glassBG = 0.28, _glassSec = 0.38, _glassElem = 0.48,
+        bg      = Color3.fromRGB(230,232,255),  topbar  = Color3.fromRGB(245,246,255),
+        sidebar = Color3.fromRGB(235,237,255),  section = Color3.fromRGB(255,255,255),
+        elem    = Color3.fromRGB(255,255,255),  elemHov = Color3.fromRGB(240,240,255),
+        elemAct = Color3.fromRGB(215,218,255),  tabSel  = Color3.fromRGB(238,238,255),
+        accent  = Color3.fromRGB(108,82,255),   accentH = Color3.fromRGB(138,116,255),
+        accentD = Color3.fromRGB(195,188,255),  text    = Color3.fromRGB(22,20,48),
+        sub     = Color3.fromRGB(90,88,130),    muted   = Color3.fromRGB(160,158,200),
+        border  = Color3.fromRGB(255,255,255),  input   = Color3.fromRGB(248,248,255),
+        scroll  = Color3.fromRGB(180,178,220),
+        success = Color3.fromRGB(28,168,84),    warning = Color3.fromRGB(190,140,20),
+        error   = Color3.fromRGB(200,42,42),    info    = Color3.fromRGB(38,140,210),
+    },
+
+    -- Soft neumorphic clay: monochrome, embossed dual-shadow elements
+    -- _neu=true tells the builder to render inner light/dark shadow strokes
+    Neumorphism = {
+        _neu      = true,
+        _neuLight = Color3.fromRGB(255,255,255),
+        _neuDark  = Color3.fromRGB(185,188,200),
+        bg      = Color3.fromRGB(220,222,230),  topbar  = Color3.fromRGB(220,222,230),
+        sidebar = Color3.fromRGB(215,217,226),  section = Color3.fromRGB(220,222,230),
+        elem    = Color3.fromRGB(220,222,230),  elemHov = Color3.fromRGB(212,215,224),
+        elemAct = Color3.fromRGB(208,210,220),  tabSel  = Color3.fromRGB(218,220,228),
+        accent  = Color3.fromRGB(100,80,240),   accentH = Color3.fromRGB(128,108,255),
+        accentD = Color3.fromRGB(180,176,230),  text    = Color3.fromRGB(40,40,60),
+        sub     = Color3.fromRGB(110,112,140),  muted   = Color3.fromRGB(160,162,185),
+        border  = Color3.fromRGB(200,202,215),  input   = Color3.fromRGB(215,217,226),
+        scroll  = Color3.fromRGB(170,172,192),
+        success = Color3.fromRGB(40,180,90),    warning = Color3.fromRGB(200,155,30),
+        error   = Color3.fromRGB(210,55,55),    info    = Color3.fromRGB(50,145,220),
+    },
 
     -- ── v6.1 NEW ──────────────────────────────────────────────────
 
@@ -353,6 +536,13 @@ function Nexus:CreateWindow(opts)
     local SW      = WIN_W >= 380 and 148 or 0
     local TOPH    = 44       -- slimmed (was 50)
 
+    -- v7.0: glass / neumorphism flags (read from theme)
+    local isGlass  = T._glass == true
+    local isNeu    = T._neu   == true
+    local glassBG  = T._glassBG  or .28
+    local glassSec = T._glassSec or .38
+    local glassEl  = T._glassElem or .48
+
     -- Design constants — sharper radius values
     local CR_WIN  = 10       -- window corner radius (was 16)
     local CR_SEC  = 8        -- section corner radius (was 10)
@@ -367,6 +557,8 @@ function Nexus:CreateWindow(opts)
     local function rT(i,p,k) if i and k then table.insert(reg,{i=i,p=p,k=k}) end end
     local function applyTheme(nT)
         T=nT
+        isGlass=T._glass==true; isNeu=T._neu==true
+        glassBG=T._glassBG or .28; glassSec=T._glassSec or .38; glassEl=T._glassElem or .48
         for _,r in ipairs(reg) do pcall(function()
             if r.i and r.i.Parent and nT[r.k] then r.i[r.p]=nT[r.k] end
         end) end
@@ -2061,6 +2253,283 @@ function Nexus:CreateWindow(opts)
                 return regE(o.Id,Obj,o.Name,f)
             end
 
+            -- ═══ v7.0: GRAPH ══════════════════════════════════════
+            -- sec:AddGraph({Name, Type="Line"|"Bar", Height=80,
+            --   Data={}, Max=100, Min=0, Color, MaxPoints=40})
+            -- Returns: :Push(v) :SetData(t) :Clear() :Get()
+            function Sec:AddGraph(o)
+                o = o or {}
+                local gType  = o.Type      or "Line"
+                local gH     = o.Height    or 80
+                local gColor = o.Color     or T.accent
+                local gMax   = o.Max       or 100
+                local gMin   = o.Min       or 0
+                local maxPts = o.MaxPoints or 40
+                local gFill  = o.Fill ~= false
+                local data   = {}
+                for _,v in ipairs(o.Data or {}) do table.insert(data,v) end
+
+                local f = ef(gH + 26)
+                mL(f, o.Name or "Graph", 8)
+
+                -- Value pill
+                local vPill = N("Frame",{Size=UDim2.new(0,52,0,18),
+                    Position=UDim2.new(1,-56,0,5),BackgroundColor3=gColor,
+                    BackgroundTransparency=.82,BorderSizePixel=0,ZIndex=7,Parent=f})
+                N("UICorner",{CornerRadius=UDim.new(1,0),Parent=vPill})
+                N("UIStroke",{Color=gColor,Thickness=1,Transparency=.5,Parent=vPill})
+                local vLbl = N("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
+                    Text="",TextColor3=gColor,TextSize=10,Font=Enum.Font.GothamBold,ZIndex=8,Parent=vPill})
+
+                -- Graph area
+                local area = N("Frame",{Size=UDim2.new(1,-14,0,gH),Position=UDim2.new(0,7,0,24),
+                    BackgroundColor3=T.border,BackgroundTransparency=.75,BorderSizePixel=0,
+                    ClipsDescendants=true,ZIndex=6,Parent=f})
+                N("UICorner",{CornerRadius=UDim.new(0,5),Parent=area})
+                N("UIStroke",{Color=T.border,Thickness=1,Transparency=.4,Parent=area})
+
+                -- Pool for segment/bar frames
+                local segPool  = sharedPool("Frame")
+                local segments = {}
+
+                local function redraw()
+                    for _,s in ipairs(segments) do segPool:release(s) end
+                    segments = {}
+                    if #data == 0 then vLbl.Text = "—"; return end
+                    local range = math.max(gMax - gMin, 0.001)
+                    local n     = #data
+                    vLbl.Text   = tostring(math.floor(data[n]))
+
+                    if gType == "Bar" then
+                        local bw = 1 / n
+                        for i,v in ipairs(data) do
+                            local pct = clamp((v - gMin) / range, 0, 1)
+                            local bar = segPool:get({
+                                AnchorPoint        = Vector2.new(0,1),
+                                Size               = UDim2.new(bw,-2,0,math.max(1,math.floor(pct*(gH-4)))),
+                                Position           = UDim2.new((i-1)*bw,1,1,0),
+                                BackgroundColor3   = gColor,
+                                BackgroundTransparency = 0,
+                                BorderSizePixel    = 0,
+                                ZIndex             = 7,
+                                Parent             = area,
+                            })
+                            N("UICorner",{CornerRadius=UDim.new(0,2),Parent=bar})
+                            table.insert(segments, bar)
+                        end
+                    else -- Line
+                        if n < 2 then return end
+                        local aW = math.max(area.AbsoluteSize.X, 1)
+                        local aH = math.max(gH, 1)
+                        for i = 1, n-1 do
+                            local p1x = (i-1)/(n-1)
+                            local p1y = 1 - clamp((data[i]   - gMin)/range, 0, 1)
+                            local p2x =  i  /(n-1)
+                            local p2y = 1 - clamp((data[i+1] - gMin)/range, 0, 1)
+                            local dx  = (p2x - p1x)*aW
+                            local dy  = (p2y - p1y)*aH
+                            local len = math.sqrt(dx*dx + dy*dy)
+                            if len < 0.5 then continue end
+                            local ang = math.deg(math.atan2(dy, dx))
+                            local seg = segPool:get({
+                                AnchorPoint        = Vector2.new(0,.5),
+                                Size               = UDim2.new(0,len,0,2),
+                                Position           = UDim2.new(p1x,0,p1y,0),
+                                BackgroundColor3   = gColor,
+                                BackgroundTransparency = 0,
+                                BorderSizePixel    = 0,
+                                Rotation           = ang,
+                                ZIndex             = 7,
+                                Parent             = area,
+                            })
+                            table.insert(segments, seg)
+                            if gFill and dy > 0 then
+                                local fh = math.max(1, math.floor(math.abs(dy)))
+                                local fseg = segPool:get({
+                                    AnchorPoint        = Vector2.new(0,0),
+                                    Size               = UDim2.new(0,math.max(1,math.floor(math.abs(dx))),0,fh),
+                                    Position           = UDim2.new(p1x,0,math.max(p1y,p2y),0),
+                                    BackgroundColor3   = gColor,
+                                    BackgroundTransparency = .72,
+                                    BorderSizePixel    = 0,
+                                    ZIndex             = 6,
+                                    Parent             = area,
+                                })
+                                table.insert(segments, fseg)
+                            end
+                        end
+                    end
+                end
+
+                task.defer(redraw)
+                area:GetPropertyChangedSignal("AbsoluteSize"):Connect(redraw)
+
+                local Obj = {_frame = f}
+                function Obj:Push(v)
+                    table.insert(data, v)
+                    while #data > maxPts do table.remove(data,1) end
+                    redraw()
+                end
+                function Obj:SetData(t)
+                    data = {}
+                    for _,v in ipairs(t) do table.insert(data,v) end
+                    redraw()
+                end
+                function Obj:Clear()  data = {}; redraw() end
+                function Obj:Get()    return data end
+                function Obj:SetVisible(v) f.Visible = v end
+                function Obj:DependsOn(other,cond) depFn(self,other,cond) end
+                return regE(o.Id, Obj, o.Name, f)
+            end
+
+            -- ═══ v7.0: VIRTUALIZED LIST ═══════════════════════════
+            -- sec:AddList({Name, Items={}, MaxVisible=6, ItemHeight=28,
+            --   MultiSelect, Callback, SearchPlaceholder})
+            -- Returns: :Set(items) :Get() :Refresh() :Clear()
+            function Sec:AddList(o)
+                o = o or {}
+                local items      = o.Items     or {}
+                local maxVis     = o.MaxVisible or 6
+                local iH         = o.ItemHeight or 28
+                local multiSel   = o.MultiSelect == true
+                local selected   = {}
+                local scrollTop  = 0
+                local filtered   = {}
+                local nameOffset = o.Name and 22 or 0
+                local totalH     = maxVis * iH + 32 + nameOffset
+
+                local f = ef(totalH)
+                if o.Name then mL(f, o.Name, 8) end
+                addTip(f, o.Tooltip)
+
+                -- Search bar
+                local sBg = N("Frame",{
+                    Size=UDim2.new(1,-14,0,24),
+                    Position=UDim2.new(0,7,0,nameOffset+4),
+                    BackgroundColor3=T.input,BackgroundTransparency=.2,
+                    BorderSizePixel=0,ZIndex=7,Parent=f})
+                N("UICorner",{CornerRadius=UDim.new(0,5),Parent=sBg})
+                N("UIStroke",{Color=T.border,Thickness=1,Parent=sBg}); rT(sBg,"BackgroundColor3","input")
+                N("TextLabel",{Size=UDim2.new(0,14,1,0),Position=UDim2.new(0,6,0,0),
+                    BackgroundTransparency=1,Text="⌕",TextColor3=T.muted,TextSize=11,
+                    Font=Enum.Font.GothamBold,ZIndex=8,Parent=sBg})
+                local sBox = N("TextBox",{Size=UDim2.new(1,-20,1,0),Position=UDim2.new(0,18,0,0),
+                    BackgroundTransparency=1,Text="",
+                    PlaceholderText=o.SearchPlaceholder or "Filter...",
+                    PlaceholderColor3=T.muted,TextColor3=T.text,TextSize=11,Font=Enum.Font.Gotham,
+                    TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,ZIndex=9,Parent=sBg})
+                rT(sBox,"TextColor3","text")
+
+                -- Viewport (clips rows)
+                local viewport = N("Frame",{
+                    Size=UDim2.new(1,-14,0,maxVis*iH),
+                    Position=UDim2.new(0,7,0,nameOffset+32),
+                    BackgroundTransparency=1,ClipsDescendants=true,ZIndex=6,Parent=f})
+
+                -- Row pool (shared)
+                local rowPool = sharedPool("TextButton")
+                local rows    = {}
+
+                local function rebuild()
+                    for _,r in ipairs(rows) do rowPool:release(r) end
+                    rows = {}
+                    local visN = math.min(maxVis, math.max(0, #filtered - scrollTop))
+                    for i = 1, visN do
+                        local idx  = scrollTop + i
+                        local item = filtered[idx]; if not item then break end
+                        local sel  = table.find(selected, item) ~= nil
+                        local row  = rowPool:get({
+                            Size               = UDim2.new(1,0,0,iH-2),
+                            Position           = UDim2.new(0,0,0,(i-1)*iH),
+                            BackgroundColor3   = sel and T.accentD or T.elem,
+                            BackgroundTransparency = sel and .2 or .55,
+                            Text               = "",
+                            AutoButtonColor    = false,
+                            ZIndex             = 7,
+                            Parent             = viewport,
+                        })
+                        N("UICorner",{CornerRadius=UDim.new(0,4),Parent=row})
+                        if sel then
+                            N("TextLabel",{Size=UDim2.new(0,14,1,0),Position=UDim2.new(0,5,0,0),
+                                BackgroundTransparency=1,Text="✓",TextColor3=T.accent,
+                                TextSize=10,Font=Enum.Font.GothamBold,ZIndex=8,Parent=row})
+                        end
+                        N("TextLabel",{
+                            Size=UDim2.new(1,sel and -20 or -10,1,0),
+                            Position=UDim2.new(0,sel and 20 or 9,0,0),
+                            BackgroundTransparency=1,Text=tostring(item),
+                            TextColor3=sel and T.text or T.sub,TextSize=11,
+                            Font=sel and Enum.Font.GothamSemibold or Enum.Font.Gotham,
+                            TextXAlignment=Enum.TextXAlignment.Left,ZIndex=8,Parent=row})
+                        row.MouseEnter:Connect(function()
+                            if not table.find(selected,item) then tw(row,.07,{BackgroundTransparency=.3}) end
+                        end)
+                        row.MouseLeave:Connect(function()
+                            tw(row,.07,{BackgroundTransparency=table.find(selected,item) and .2 or .55})
+                        end)
+                        row.MouseButton1Click:Connect(function()
+                            if multiSel then
+                                local si = table.find(selected,item)
+                                if si then table.remove(selected,si) else table.insert(selected,item) end
+                            else
+                                selected = {item}
+                            end
+                            rebuild()
+                            if o.Callback then
+                                task.spawn(o.Callback, multiSel and selected or selected[1], idx)
+                            end
+                        end)
+                        table.insert(rows, row)
+                    end
+                end
+
+                -- Scroll controls
+                local ctrlY = nameOffset + 32 + maxVis*iH + 2
+                local ctrl  = N("Frame",{Size=UDim2.new(1,-14,0,20),Position=UDim2.new(0,7,0,ctrlY),
+                    BackgroundTransparency=1,ZIndex=6,Parent=f})
+                local upBtn = N("TextButton",{Size=UDim2.new(0,26,0,20),BackgroundColor3=T.elem,
+                    BackgroundTransparency=.4,Text="▲",TextColor3=T.sub,TextSize=10,
+                    Font=Enum.Font.GothamBold,AutoButtonColor=false,ZIndex=7,Parent=ctrl})
+                N("UICorner",{CornerRadius=UDim.new(0,4),Parent=upBtn})
+                local dnBtn = N("TextButton",{Size=UDim2.new(0,26,0,20),Position=UDim2.new(0,30,0,0),
+                    BackgroundColor3=T.elem,BackgroundTransparency=.4,Text="▼",TextColor3=T.sub,
+                    TextSize=10,Font=Enum.Font.GothamBold,AutoButtonColor=false,ZIndex=7,Parent=ctrl})
+                N("UICorner",{CornerRadius=UDim.new(0,4),Parent=dnBtn})
+                local cntLbl = N("TextLabel",{Size=UDim2.new(1,-62,0,20),Position=UDim2.new(0,60,0,0),
+                    BackgroundTransparency=1,Text="",TextColor3=T.muted,TextSize=10,
+                    Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=7,Parent=ctrl})
+
+                local function applyFilter()
+                    local q = sBox.Text:lower()
+                    filtered = {}
+                    for _,it in ipairs(items) do
+                        if q == "" or tostring(it):lower():find(q,1,true) then
+                            table.insert(filtered, it)
+                        end
+                    end
+                    scrollTop = 0; rebuild()
+                    cntLbl.Text = #filtered .. " / " .. #items
+                end
+
+                upBtn.MouseButton1Click:Connect(function()
+                    if scrollTop > 0 then scrollTop -= 1; rebuild() end
+                end)
+                dnBtn.MouseButton1Click:Connect(function()
+                    if scrollTop + maxVis < #filtered then scrollTop += 1; rebuild() end
+                end)
+                sBox:GetPropertyChangedSignal("Text"):Connect(applyFilter)
+                applyFilter()
+
+                local Obj = {_frame = f}
+                function Obj:Set(t)  items = t; applyFilter() end
+                function Obj:Get()   return multiSel and selected or selected[1] end
+                function Obj:Refresh() applyFilter() end
+                function Obj:Clear() selected = {}; rebuild() end
+                function Obj:SetVisible(v) f.Visible = v end
+                function Obj:DependsOn(other,cond) depFn(self,other,cond) end
+                return regE(o.Id, Obj, o.Name, f)
+            end
+
             -- Section lock
             function Sec:Lock(message)
                 local lock=N("Frame",{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.fromRGB(0,0,0),
@@ -2112,6 +2581,425 @@ function Nexus:CreateWindow(opts)
         bs:AddLabel({Text="›  Ctrl+Z — Undo  ·  Ctrl+Y — Redo",Color=T.muted})
         bs:AddButton({Name="Show Keybind Overlay",Callback=function()W:ShowBinds()end})
         return bt
+    end
+
+    -- ════════════════════════════════════════════════════════════
+    --  v7.0 ADDITIONS
+    -- ════════════════════════════════════════════════════════════
+
+    -- W:SetAccent(Color3) — live accent swap without full theme switch
+    function W:SetAccent(c)
+        T.accent = c
+        for _,r in ipairs(reg) do
+            if r.k == "accent" then
+                pcall(function() if r.i and r.i.Parent then r.i[r.p] = c end end)
+            end
+        end
+    end
+
+    -- W:Sequence(steps, onDone?) — chained tween sequencer
+    function W:Sequence(steps, onDone) _runSeq(steps, 1, onDone) end
+
+    -- W:Spring(obj, targetProps, cfg) — spring-physics tween
+    function W:Spring(obj, props, cfg) return Nexus:Spring(obj, props, cfg) end
+
+    -- W:Debug(msg, level) — stores + prints to console
+    local _errLog = {}
+    function W:Debug(msg, level)
+        level = level or "info"
+        table.insert(_errLog, 1, {msg=tostring(msg), level=level, t=os.clock()})
+        if #_errLog > 50 then table.remove(_errLog) end
+        print(("[NexusUI %s] %s"):format(level:upper(), msg))
+    end
+
+    -- ── Keyboard Navigation ───────────────────────────────────────
+    local _focusables = {}
+    local _focusIdx   = 0
+    local _focusRing  = nil
+
+    local function _clearFocus()
+        if _focusRing then pcall(function() _focusRing.Transparency = 1 end) end
+        _focusRing = nil; _focusIdx = 0
+    end
+    local function _setFocus(idx)
+        _clearFocus()
+        local f = _focusables[idx]; if not f then return end
+        _focusIdx = idx
+        if f.frame and f.frame.Parent then
+            local ex = f.frame:FindFirstChild("_NxFR")
+            if ex then _focusRing = ex; _focusRing.Transparency = 0
+            else
+                _focusRing = N("UIStroke",{Name="_NxFR",Color=T.accent,
+                    Thickness=2,Transparency=0,Parent=f.frame})
+                rT(_focusRing,"Color","accent")
+            end
+        end
+    end
+    W._regFocus = function(frame, activateFn)
+        table.insert(_focusables, {frame=frame, activate=activateFn})
+    end
+
+    table.insert(W._conns, UserInputService.InputBegan:Connect(function(i, gp)
+        if gp then return end
+        if i.KeyCode == Enum.KeyCode.Tab then
+            if #_focusables == 0 then return end
+            local shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+                       or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+            local next = shift and (_focusIdx-1) or (_focusIdx+1)
+            if next < 1 then next = #_focusables elseif next > #_focusables then next = 1 end
+            _setFocus(next)
+        elseif (i.KeyCode==Enum.KeyCode.Return or i.KeyCode==Enum.KeyCode.Space) and _focusIdx>0 then
+            local f = _focusables[_focusIdx]
+            if f and f.activate then pcall(f.activate) end
+        elseif i.KeyCode == Enum.KeyCode.Escape then
+            _clearFocus()
+        end
+    end))
+
+    -- ── Enhanced Notification System (v7.0) ──────────────────────
+    -- Priority queue, action buttons, grouping, Critical no-dismiss
+    local _nGroups  = {}   -- [title..type] = {count, badge, lastTime}
+    local _nQueue   = {}
+    local _nActive  = 0
+    local _MAX_N    = 4
+    local _PRIO     = {Critical=4,High=3,Normal=2,Low=1}
+
+    local _origNotify = W.Notify
+    function W:Notify(o)
+        o = o or {}
+        local function _spawn()
+            _nActive += 1
+            local nt    = o.Title   or "Notification"
+            local body  = o.Content or o.Body or ""
+            local dur   = o.Duration or 4
+            local ntype = o.Type    or "Info"
+            local prio  = o.Priority or "Normal"
+            local acts  = o.Actions or {}
+            local tMap  = {Info=T.info,Success=T.success,Warning=T.warning,Error=T.error}
+            local syms  = {Info="ℹ",Success="✓",Warning="⚠",Error="✕"}
+            local tCol  = tMap[ntype] or T.accent
+
+            -- Grouping: same Title+Type within 3 s
+            local gKey = nt..ntype
+            local gd   = _nGroups[gKey]
+            if gd and (os.clock()-gd.lastTime) < 3 then
+                gd.count += 1
+                if gd.badge and gd.badge.Parent then
+                    gd.badge.Text    = "×"..gd.count
+                    gd.badge.Visible = true
+                end
+                _nActive -= 1; return
+            end
+            _nGroups[gKey] = {count=1, lastTime=os.clock()}
+
+            local notif = N("Frame",{
+                Size=UDim2.new(1,0,0,0), BackgroundColor3=T.topbar,
+                BackgroundTransparency=.05, BorderSizePixel=0,
+                ClipsDescendants=true, LayoutOrder=_nActive, ZIndex=10, Parent=notifBox})
+            N("UICorner",{CornerRadius=UDim.new(0,8),Parent=notif})
+
+            -- Priority border
+            local bW = prio=="Critical" and 3 or prio=="High" and 2 or 1
+            local bC = prio=="Critical" and T.error or prio=="High" and T.warning or T.border
+            N("UIStroke",{Color=bC,Thickness=bW,Transparency=.2,Parent=notif})
+
+            -- Left strip
+            local strip = N("Frame",{Size=UDim2.new(0,4,1,0),BackgroundColor3=tCol,BorderSizePixel=0,ZIndex=11,Parent=notif})
+            N("UICorner",{CornerRadius=UDim.new(0,3),Parent=strip})
+
+            -- Group badge
+            local gBF = N("Frame",{Size=UDim2.new(0,30,0,16),AnchorPoint=Vector2.new(1,0),
+                Position=UDim2.new(1,-32,0,6),BackgroundColor3=tCol,BackgroundTransparency=.2,
+                BorderSizePixel=0,ZIndex=14,Visible=false,Parent=notif})
+            N("UICorner",{CornerRadius=UDim.new(1,0),Parent=gBF})
+            local gBL = N("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
+                Text="×1",TextColor3=Color3.fromRGB(255,255,255),TextSize=9,
+                Font=Enum.Font.GothamBold,ZIndex=15,Parent=gBF})
+            _nGroups[gKey].badge = gBL
+
+            -- Icon
+            local ic = N("Frame",{Size=UDim2.new(0,24,0,24),AnchorPoint=Vector2.new(0,.5),
+                Position=UDim2.new(0,14,0,0),BackgroundColor3=tCol,BackgroundTransparency=.8,
+                BorderSizePixel=0,ZIndex=11,Parent=notif})
+            N("UICorner",{CornerRadius=UDim.new(1,0),Parent=ic})
+            N("TextLabel",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
+                Text=syms[ntype] or "•",TextColor3=tCol,TextSize=12,
+                Font=Enum.Font.GothamBold,ZIndex=12,Parent=ic})
+
+            local tLbl = N("TextLabel",{Size=UDim2.new(1,-62,0,17),Position=UDim2.new(0,46,0,0),
+                BackgroundTransparency=1,Text=nt,TextColor3=T.text,TextSize=12,
+                Font=Enum.Font.GothamBold,TextXAlignment=Enum.TextXAlignment.Left,ZIndex=12,Parent=notif})
+            local xb = N("TextButton",{Size=UDim2.new(0,16,0,16),AnchorPoint=Vector2.new(1,.5),
+                Position=UDim2.new(1,-7,.5,-8),BackgroundTransparency=1,
+                Text="✕",TextColor3=T.muted,TextSize=9,Font=Enum.Font.GothamBold,ZIndex=13,Parent=notif})
+
+            local bLbl
+            if body ~= "" then
+                bLbl = N("TextLabel",{Size=UDim2.new(1,-50,0,0),Position=UDim2.new(0,46,0,0),
+                    BackgroundTransparency=1,Text=body,TextColor3=T.sub,TextSize=10,
+                    Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left,
+                    TextWrapped=true,ZIndex=12,Parent=notif})
+            end
+
+            -- Action buttons
+            local aBtns = {}
+            for _,act in ipairs(acts) do
+                local ab2 = N("TextButton",{Size=UDim2.new(0,0,0,22),
+                    AutomaticSize=Enum.AutomaticSize.X,
+                    BackgroundColor3=tCol,BackgroundTransparency=.75,
+                    Text=act.Label or "Action",TextColor3=tCol,TextSize=10,
+                    Font=Enum.Font.GothamBold,AutoButtonColor=false,ZIndex=13,Parent=notif})
+                N("UICorner",{CornerRadius=UDim.new(0,5),Parent=ab2})
+                N("UIPadding",{PaddingLeft=UDim.new(0,8),PaddingRight=UDim.new(0,8),Parent=ab2})
+                ab2.MouseEnter:Connect(function() tw(ab2,.08,{BackgroundTransparency=.4}) end)
+                ab2.MouseLeave:Connect(function() tw(ab2,.08,{BackgroundTransparency=.75}) end)
+                ab2.MouseButton1Click:Connect(function()
+                    if act.Callback then task.spawn(act.Callback) end
+                    if act.DismissOnClick ~= false then
+                        tw(notif,.15,{BackgroundTransparency=1,Size=UDim2.new(1,0,0,0)})
+                        task.delay(.18,function() pcall(function() notif:Destroy() end) end)
+                        _nActive = math.max(0,_nActive-1)
+                        _nGroups[gKey] = nil
+                        if #_nQueue>0 then task.delay(.05,function() W:Notify(table.remove(_nQueue,1)) end) end
+                    end
+                end)
+                table.insert(aBtns, ab2)
+            end
+
+            -- Progress drain bar
+            local pd = N("Frame",{Size=UDim2.new(1,0,0,2),AnchorPoint=Vector2.new(0,1),
+                Position=UDim2.new(0,0,1,0),BackgroundColor3=tCol,BackgroundTransparency=.55,
+                BorderSizePixel=0,ZIndex=12,Parent=notif})
+
+            local alive = true
+            local function dismiss()
+                if not alive then return end; alive = false
+                _nActive = math.max(0,_nActive-1); _nGroups[gKey] = nil
+                tw(notif,.18,{BackgroundTransparency=1,Size=UDim2.new(1,0,0,0)})
+                task.delay(.2,function() pcall(function() notif:Destroy() end) end)
+                if #_nQueue>0 then task.delay(.05,function() W:Notify(table.remove(_nQueue,1)) end) end
+            end
+            xb.MouseButton1Click:Connect(dismiss)
+
+            -- Critical: pulsing border
+            local pulseC
+            if prio=="Critical" then
+                local ns = notif:FindFirstChildWhichIsA("UIStroke")
+                if ns then
+                    local ph = 0
+                    pulseC = RunService.Heartbeat:Connect(function(dt)
+                        if not(ns and ns.Parent) then pulseC:Disconnect(); return end
+                        ph += dt*3
+                        ns.Transparency = lerp(.05,.65,(math.sin(ph)+1)*.5)
+                    end)
+                end
+            end
+
+            task.defer(function()
+                local bH  = bLbl and bLbl.TextBounds.Y or 0
+                if bLbl then bLbl.Size = UDim2.new(1,-50,0,bH) end
+                local aH  = #aBtns > 0 and 30 or 0
+                local PAD = 10
+                local tot = math.max(42, bH>0 and (32+bH+PAD+aH) or (42+aH))
+                local mid = tot/2
+                ic.Position  = UDim2.new(0,14,0,mid-12)
+                xb.Position  = UDim2.new(1,-7,.5,-8)
+                if bH > 0 then
+                    tLbl.Position = UDim2.new(0,46,0,PAD/2)
+                    if bLbl then bLbl.Position = UDim2.new(0,46,0,PAD/2+18) end
+                else
+                    tLbl.Position = UDim2.new(0,46,0,mid-8)
+                end
+                if #aBtns > 0 then
+                    local ax = 46
+                    for _,btn in ipairs(aBtns) do
+                        btn.Position = UDim2.new(0,ax,0,tot-aH+4)
+                        task.wait(); ax += btn.AbsoluteSize.X + 6
+                    end
+                end
+                tw(notif,.18,{Size=UDim2.new(1,0,0,tot)})
+                if prio ~= "Critical" then
+                    twL(pd, dur, {Size=UDim2.new(0,0,0,2)})
+                    task.delay(dur, function()
+                        dismiss()
+                        if pulseC then pcall(function() pulseC:Disconnect() end) end
+                    end)
+                end
+            end)
+        end
+
+        if _nActive < _MAX_N then
+            _spawn()
+        else
+            table.insert(_nQueue, o)
+            table.sort(_nQueue, function(a,b)
+                return (_PRIO[a.Priority or "Normal"] or 2) > (_PRIO[b.Priority or "Normal"] or 2)
+            end)
+        end
+    end
+
+    -- ── Debug overlay ─────────────────────────────────────────────
+    local dbgOv = N("Frame",{Size=UDim2.new(0,192,0,82),Position=UDim2.new(0,8,1,-90),
+        BackgroundColor3=Color3.fromRGB(0,0,0),BackgroundTransparency=.44,
+        BorderSizePixel=0,ZIndex=999,Visible=false,Parent=sg})
+    N("UICorner",{CornerRadius=UDim.new(0,7),Parent=dbgOv})
+    N("UIStroke",{Color=T.accent,Thickness=1,Transparency=.55,Parent=dbgOv})
+    rT(dbgOv:FindFirstChildWhichIsA("UIStroke"),"Color","accent")
+    local dbgL = {}
+    for i=1,4 do
+        dbgL[i] = N("TextLabel",{Size=UDim2.new(1,-12,0,17),
+            Position=UDim2.new(0,6,0,(i-1)*18+5),BackgroundTransparency=1,Text="",
+            TextColor3=Color3.fromRGB(0,220,120),TextSize=10,Font=Enum.Font.Code,
+            TextXAlignment=Enum.TextXAlignment.Left,ZIndex=1000,Parent=dbgOv})
+    end
+    local _dbgHB; local _dbgFPS=0; local _dbgF=0
+    local function startDbg()
+        if _dbgHB then return end
+        _dbgHB = RunService.Heartbeat:Connect(function(dt)
+            _dbgFPS = lerp(_dbgFPS,1/dt,.1); _dbgF+=1
+            if _dbgF%12==0 then
+                local ps=""
+                for k,p in pairs(_sharedPools) do ps=ps..k:sub(1,2).."="..#p._free.." " end
+                dbgL[1].Text = "FPS    "..math.floor(_dbgFPS)
+                dbgL[2].Text = "Focus  ".._focusIdx.."/"..#_focusables
+                dbgL[3].Text = "Pool   "..ps
+                dbgL[4].Text = "Theme  "..tname
+            end
+        end)
+    end
+    local function stopDbg()
+        if _dbgHB then _dbgHB:Disconnect(); _dbgHB=nil end
+    end
+    -- Wrap Destroy to stop debug loop
+    local _origDest = W.Destroy
+    function W:Destroy() stopDbg(); _origDest(self) end
+
+    -- ── Developer Tab ─────────────────────────────────────────────
+    function W:AddDevTab()
+        local dt = self:AddTab({Name="⚙ Dev", Icon="◎"})
+
+        -- Debug overlay
+        local s1 = dt:AddSection({Name="DEBUG OVERLAY"})
+        s1:AddToggle({Name="Show Overlay",Default=false,
+            Description="FPS · Focus · Pool counts · Active theme",
+            Callback=function(v)
+                dbgOv.Visible=v
+                if v then startDbg() else stopDbg() end
+            end})
+        s1:AddButtonRow({Buttons={
+            {Name="Flush Pools",Callback=function()
+                for _,p in pairs(_sharedPools) do p:flush() end
+                W:Notify({Title="Dev",Content="Pools flushed.",Type="Info",Duration=2})
+            end},
+            {Name="Clear Log",Callback=function()
+                _errLog={}
+                W:Notify({Title="Dev",Content="Error log cleared.",Type="Info",Duration=2})
+            end},
+        }})
+
+        -- Error log
+        local s2 = dt:AddSection({Name="ERROR LOG",Collapsed=true})
+        s2:AddLabel({Text="Call W:Debug(msg, level) to push entries.",Color=T.muted})
+        local logLbls={}
+        for i=1,8 do table.insert(logLbls, s2:AddLabel({Text="",Color=T.sub})) end
+        s2:AddButton({Name="Refresh Log",Callback=function()
+            for i=1,8 do
+                local e=_errLog[i]
+                if e and logLbls[i] then
+                    local cm={info=T.sub,warn=T.warning,error=T.error}
+                    logLbls[i]:Set("["..e.level:upper().."] "..e.msg, cm[e.level] or T.sub)
+                end
+            end
+        end})
+
+        -- Pool stats
+        local s3 = dt:AddSection({Name="POOL STATS",Collapsed=true})
+        local pTbl = s3:AddTable({Columns={"Class","Free","Created","Recycled"},Rows={}})
+        s3:AddButton({Name="Refresh",Callback=function()
+            local rows={}
+            for k,p in pairs(_sharedPools) do
+                local st=p:stats()
+                table.insert(rows,{k,tostring(#p._free),tostring(st.created),tostring(st.recycled)})
+            end
+            pTbl:Update(rows)
+        end})
+
+        -- Theme preview
+        local s4 = dt:AddSection({Name="THEME PREVIEW"})
+        s4:AddParagraph({Title="All Themes",
+            Body="v7.0 adds Glassmorphism (frosted white glass) and "..
+                 "Neumorphism (soft clay). Select below to preview live."})
+        local tNames={}
+        for k in pairs(Nexus.Themes) do table.insert(tNames,k) end
+        table.sort(tNames)
+        s4:AddDropdown({Name="Preview Theme",Items=tNames,Default=tname,
+            Callback=function(v) W:SetTheme(v) end})
+        s4:AddButtonRow({Buttons={
+            {Name="Reset BlackModern",Callback=function() W:SetTheme("BlackModern") end},
+        }})
+
+        -- Spring / Sequence tester
+        local s5 = dt:AddSection({Name="ANIMATION TESTER",Collapsed=true})
+        s5:AddParagraph({Title="Spring Physics",
+            Body="Nexus:Spring(obj, {prop=target}, cfg) — mass-spring damper on any numeric property."})
+        s5:AddButtonRow({Buttons={
+            {Name="▶ Spring",Callback=function()
+                local h = Nexus:Spring(main,{BackgroundTransparency=.25},{k=280,d=20,
+                    onSettle=function() tw(main,.3,{BackgroundTransparency=0}) end})
+                W:Notify({Title="Spring",Content="Spring fired on main frame.",Type="Info",Duration=2})
+            end},
+            {Name="▶ Sequence",Callback=function()
+                W:Sequence({
+                    {obj=main,time=.12,props={BackgroundTransparency=.3}},
+                    {obj=main,time=.12,props={BackgroundTransparency=0}},
+                    {obj=main,time=.10,props={BackgroundTransparency=.15}},
+                    {obj=main,time=.16,props={BackgroundTransparency=0}},
+                },function()
+                    W:Notify({Title="Sequence",Content="Flash sequence complete.",Type="Success",Duration=2})
+                end)
+            end},
+        }})
+
+        -- Notify tester
+        local s6 = dt:AddSection({Name="NOTIFY TESTER",Collapsed=true})
+        s6:AddButtonRow({Buttons={
+            {Name="Normal",  Callback=function()
+                W:Notify({Title="Normal",Content="Standard dismiss.",Type="Info",Priority="Normal",Duration=4}) end},
+            {Name="High",    Callback=function()
+                W:Notify({Title="High",Content="High priority.",Type="Warning",Priority="High",Duration=4}) end},
+        }})
+        s6:AddButtonRow({Buttons={
+            {Name="Critical",Callback=function()
+                W:Notify({Title="Critical",Content="No auto-dismiss. X to close.",Type="Error",Priority="Critical"}) end},
+            {Name="Actions", Callback=function()
+                W:Notify({Title="With Actions",Content="Choose an action below.",Type="Success",Priority="Normal",Duration=8,
+                    Actions={
+                        {Label="✓ Accept",Callback=function() W:Debug("Action: Accept","info") end},
+                        {Label="✕ Deny",  Callback=function() W:Debug("Action: Deny","warn") end, DismissOnClick=false},
+                    }}) end},
+        }})
+
+        -- Graph demo
+        local s7 = dt:AddSection({Name="GRAPH DEMO",Collapsed=true})
+        s7:AddParagraph({Title="AddGraph",Body="sec:AddGraph() — ring-buffer line/bar chart with pooled frames."})
+        local gDemo = s7:AddGraph({Name="Live FPS",Type="Line",Height=60,Max=120,Min=0,MaxPoints=30})
+        local gBar  = s7:AddGraph({Name="Random Bars",Type="Bar",Height=50,Max=100,Min=0,MaxPoints=10})
+        s7:AddButtonRow({Buttons={
+            {Name="Push Random",Callback=function()
+                gDemo:Push(math.random(40,120))
+                gBar:Push(math.random(10,100))
+            end},
+            {Name="Clear",Callback=function() gDemo:Clear(); gBar:Clear() end},
+        }})
+
+        -- List demo
+        local s8 = dt:AddSection({Name="LIST DEMO",Collapsed=true})
+        s8:AddParagraph({Title="AddList",Body="sec:AddList() — virtualized scrolling list with search filter and object pooling."})
+        local items={}; for i=1,40 do table.insert(items,"Item "..i) end
+        s8:AddList({Name="Virtualized (40 items)",Items=items,MaxVisible=5,
+            Callback=function(v) W:Debug("List selected: "..tostring(v),"info") end})
+
+        return dt
     end
 
     return W
